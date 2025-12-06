@@ -1,0 +1,31 @@
+
+{
+    "name": "file-access",
+    "description": "Read and write files locally",
+    "type": "mcp",
+    "commands": [
+      {
+        "name": "readFile",
+        "description": "Read contents of a file",
+        "parameters": {
+          "path": "string"
+        }
+      },
+      {
+        "name": "writeFile",
+        "description": "Write content to a file",
+        "parameters": {
+          "path": "string",
+          "content": "string"
+        }
+      },
+      {
+        "name": "listFiles",
+        "description": "List files in a directory",
+        "parameters": {
+          "directory": "string"
+        }
+      }
+    ]
+  }
+  
