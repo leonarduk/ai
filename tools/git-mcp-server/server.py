@@ -8,7 +8,7 @@ from mcp.types import Tool, TextContent
 
 app = Server("git-server")
 
-def run_git_command(repo_path: str, command: list[str]) -> tuple[bool, str]:
+def run_git_command(repo_path: str, command: list[str], timeout: int = 60) -> tuple[bool, str]:
     """Run a git command and return success status and output"""
     try:
         result = subprocess.run(
@@ -16,12 +16,12 @@ def run_git_command(repo_path: str, command: list[str]) -> tuple[bool, str]:
             cwd=repo_path,
             capture_output=True,
             text=True,
-            timeout=30
+            timeout=timeout
         )
         output = result.stdout + result.stderr
         return result.returncode == 0, output
     except subprocess.TimeoutExpired:
-        return False, "Command timed out after 30 seconds"
+        return False, f"Command timed out after {timeout} seconds"
     except Exception as e:
         return False, str(e)
 
@@ -155,7 +155,8 @@ async def call_tool(name: str, arguments: dict) -> list[TextContent]:
         
         elif name == "git_add":
             files = arguments["files"]
-            success, output = run_git_command(repo_path, ["add", files])
+            # Use longer timeout for add operations
+            success, output = run_git_command(repo_path, ["add", files], timeout=120)
             if success:
                 # Show what was added
                 success2, status = run_git_command(repo_path, ["status", "--short"])
