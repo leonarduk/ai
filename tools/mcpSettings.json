@@ -4,37 +4,78 @@
       "command": "C:\\Users\\steph\\workspace\\GitHub\\ai\\.venv\\Scripts\\python.exe",
       "args": [
         "C:\\Users\\steph\\workspace\\GitHub\\ai\\tools\\email-mcp-server\\server.py"
-      ]
+      ],
+      "description": "Server for handling email-related tasks such as sending emails and managing email inboxes."
     },
     "todoist": {
       "command": "C:\\Users\\steph\\workspace\\GitHub\\ai\\.venv\\Scripts\\python.exe",
       "args": [
         "C:\\Users\\steph\\workspace\\GitHub\\ai\\tools\\todoist-mcp-server\\server.py"
-      ]
+      ],
+      "description": "Server for interacting with Todoist, allowing tasks to be created and managed."
     },
     "filesystem": {
       "command": "C:\\Users\\steph\\workspace\\GitHub\\ai\\.venv\\Scripts\\python.exe",
       "args": [
         "C:\\Users\\steph\\workspace\\GitHub\\ai\\tools\\filesystem-mcp-server\\server.py"
-      ]
+      ],
+      "description": "Server for file system operations such as reading, writing, and listing files and directories."
     },
     "github": {
       "command": "C:\\Users\\steph\\workspace\\GitHub\\ai\\.venv\\Scripts\\python.exe",
       "args": [
         "C:\\Users\\steph\\workspace\\GitHub\\ai\\tools\\github-mcp-server\\server.py"
-      ]
+      ],
+      "description": "Server for interacting with GitHub repositories, including fetching repository information and managing pull requests."
     },
     "git": {
       "command": "C:\\Users\\steph\\workspace\\GitHub\\ai\\.venv\\Scripts\\python.exe",
       "args": [
         "C:\\Users\\steph\\workspace\\GitHub\\ai\\tools\\git-mcp-server\\server.py"
-      ]
+      ],
+      "description": "Server for Git operations such as committing changes, pushing to remote repositories, and pulling updates."
     },
     "os_info": {
       "command": "C:\\Users\\steph\\workspace\\GitHub\\ai\\.venv\\Scripts\\python.exe",
       "args": [
         "C:\\Users\\steph\\workspace\\GitHub\\ai\\tools\\os_info_mcp_server\\server.py"
-      ]
+      ],
+      "description": "Server for retrieving operating system information such as OS type, version, and hardware details."
+    },
+    "data_format": {
+      "command": "C:\\Users\\steph\\workspace\\GitHub\\ai\\.venv\\Scripts\\python.exe",
+      "args": [
+        "C:\\Users\\steph\\workspace\\GitHub\\ai\\tools\\data_format_mcp_server\\server.py"
+      ],
+      "description": "Server for handling data format conversions and transformations."
+    },
+    "data_operations": {
+      "command": "C:\\Users\\steph\\workspace\\GitHub\\ai\\.venv\\Scripts\\python.exe",
+      "args": [
+        "C:\\Users\\steph\\workspace\\GitHub\\ai\\tools\\data_operations_mcp_server\\server.py"
+      ],
+      "description": "Server for performing various data operations such as filtering, sorting, and aggregating."
+    },
+    "file_processing": {
+      "command": "C:\\Users\\steph\\workspace\\GitHub\\ai\\.venv\\Scripts\\python.exe",
+      "args": [
+        "C:\\Users\\steph\\workspace\\GitHub\\ai\\tools\\file_processing_mcp_server\\server.py"
+      ],
+      "description": "Server for processing files, including text analysis and data extraction."
+    },
+    "local_file_access": {
+      "command": "C:\\Users\\steph\\workspace\\GitHub\\ai\\.venv\\Scripts\\python.exe",
+      "args": [
+        "C:\\Users\\steph\\workspace\\GitHub\\ai\\tools\\local-file-access\\server.py"
+      ],
+      "description": "Server for accessing local files and directories, similar to the filesystem server but with additional capabilities."
+    },
+    "web_api": {
+      "command": "C:\\Users\\steph\\workspace\\GitHub\\ai\\.venv\\Scripts\\python.exe",
+      "args": [
+        "C:\\Users\\steph\\workspace\\GitHub\\ai\\tools\\web_api_mcp_server\\server.py"
+      ],
+      "description": "Server for interacting with web APIs, allowing data retrieval and manipulation through HTTP requests."
     }
   }
 }

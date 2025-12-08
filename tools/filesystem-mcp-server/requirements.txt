@@ -1,0 +1,17 @@
+# MCP framework
+mcp>=0.1.0
+
+# HTTP requests (used in other servers, optional here)
+requests>=2.31.0
+
+# Environment variable support (optional if you use .env files)
+python-dotenv>=1.0.0
+
+# Testing utilities
+pytest>=7.4.0
+
+# For subprocess and JSON (standard library, no need to install)
+# subprocess and json are built-in
+
+# Optional: code formatting and linting
+black>=23.9.1

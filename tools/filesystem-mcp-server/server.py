@@ -1,3 +1,4 @@
+
 import asyncio
 import os
 import json
@@ -55,6 +56,20 @@ async def list_tools() -> list[Tool]:
             }
         ),
         Tool(
+            name="edit_file",
+            description="Edit a file by adding, deleting, or replacing a specific line",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "path": {"type": "string", "description": "Path to the file"},
+                    "action": {"type": "string", "description": "Action: add, delete, replace"},
+                    "line_number": {"type": "integer", "description": "Line number (1-based index)"},
+                    "content": {"type": "string", "description": "Content for add or replace", "default": ""}
+                },
+                "required": ["path", "action", "line_number"]
+            }
+        ),
+        Tool(
             name="list_directory",
             description="List all files and directories in a path",
             inputSchema={
@@ -108,46 +123,78 @@ async def call_tool(name: str, arguments: dict) -> list[TextContent]:
             path = safe_path(arguments["path"])
             content = path.read_text(encoding='utf-8')
             return [TextContent(type="text", text=content)]
-        
+
         elif name == "write_file":
             path = safe_path(arguments["path"])
             path.parent.mkdir(parents=True, exist_ok=True)
             path.write_text(arguments["content"], encoding='utf-8')
             return [TextContent(type="text", text=f"Successfully wrote to {path}")]
-        
+
+        elif name == "edit_file":
+            path = safe_path(arguments["path"])
+            action = arguments["action"]
+            line_number = arguments["line_number"]
+            content = arguments.get("content", "")
+
+            if not path.exists() or not path.is_file():
+                return [TextContent(type="text", text=f"Error: {path} does not exist or is not a file")]
+
+            lines = path.read_text(encoding='utf-8').splitlines()
+
+            if line_number < 1 or line_number > len(lines) + 1:
+                return [TextContent(type="text", text=f"Invalid line number: {line_number}")]
+
+            if action == "add":
+                lines.insert(line_number - 1, content)
+            elif action == "delete":
+                if line_number <= len(lines):
+                    lines.pop(line_number - 1)
+                else:
+                    return [TextContent(type="text", text=f"Cannot delete: line {line_number} does not exist")]
+            elif action == "replace":
+                if line_number <= len(lines):
+                    lines[line_number - 1] = content
+                else:
+                    return [TextContent(type="text", text=f"Cannot replace: line {line_number} does not exist")]
+            else:
+                return [TextContent(type="text", text=f"Unknown action: {action}")]
+
+            path.write_text("\n".join(lines), encoding='utf-8')
+            return [TextContent(type="text", text=f"Successfully performed {action} on line {line_number} in {path}")]
+
         elif name == "list_directory":
             path = safe_path(arguments["path"])
             if not path.is_dir():
                 return [TextContent(type="text", text=f"Error: {path} is not a directory")]
-            
+
             items = []
             for item in sorted(path.iterdir()):
                 prefix = "[DIR]" if item.is_dir() else "[FILE]"
                 items.append(f"{prefix} {item.name}")
-            
+
             return [TextContent(type="text", text="\n".join(items))]
-        
+
         elif name == "create_directory":
             path = safe_path(arguments["path"])
             path.mkdir(parents=True, exist_ok=True)
             return [TextContent(type="text", text=f"Created directory {path}")]
-        
+
         elif name == "search_files":
             path = safe_path(arguments["path"])
             pattern = arguments["pattern"]
-            
+
             matches = []
             for item in path.rglob(f"*{pattern}*"):
                 if is_path_allowed(item):
                     matches.append(str(item))
-            
+
             result = "\n".join(matches) if matches else "No matches found"
             return [TextContent(type="text", text=result)]
-        
+
         elif name == "get_file_info":
             path = safe_path(arguments["path"])
             stat = path.stat()
-            
+
             info = {
                 "path": str(path),
                 "exists": path.exists(),
@@ -157,18 +204,18 @@ async def call_tool(name: str, arguments: dict) -> list[TextContent]:
                 "modified": stat.st_mtime,
                 "created": stat.st_ctime
             }
-            
+
             return [TextContent(type="text", text=json.dumps(info, indent=2))]
-        
+
         else:
             return [TextContent(type="text", text=f"Unknown tool: {name}")]
-    
+
     except Exception as e:
         return [TextContent(type="text", text=f"Error: {str(e)}")]
 
 async def main():
     from mcp.server.stdio import stdio_server
-    
+
     async with stdio_server() as (read_stream, write_stream):
         await app.run(
             read_stream,
