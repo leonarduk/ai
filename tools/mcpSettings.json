@@ -5,21 +5,14 @@
       "args": [
         "C:\\Users\\steph\\workspace\\GitHub\\ai\\tools\\email-mcp-server\\server.py"
       ],
-      "description": "Server for handling email-related tasks such as sending emails and managing email inboxes."
-    },
-    "todoist": {
-      "command": "C:\\Users\\steph\\workspace\\GitHub\\ai\\.venv\\Scripts\\python.exe",
-      "args": [
-        "C:\\Users\\steph\\workspace\\GitHub\\ai\\tools\\todoist-mcp-server\\server.py"
-      ],
-      "description": "Server for interacting with Todoist, allowing tasks to be created and managed."
+      "description": "Server for sending emails via SMTP and creating Todoist tasks."
     },
     "filesystem": {
       "command": "C:\\Users\\steph\\workspace\\GitHub\\ai\\.venv\\Scripts\\python.exe",
       "args": [
         "C:\\Users\\steph\\workspace\\GitHub\\ai\\tools\\filesystem-mcp-server\\server.py"
       ],
-      "description": "Server for file system operations such as reading, writing, and listing files and directories."
+      "description": "Server for all file system operations including read/write, CSV, Excel, and compression."
     },
     "github": {
       "command": "C:\\Users\\steph\\workspace\\GitHub\\ai\\.venv\\Scripts\\python.exe",
@@ -47,35 +40,14 @@
       "args": [
         "C:\\Users\\steph\\workspace\\GitHub\\ai\\tools\\data_format_mcp_server\\server.py"
       ],
-      "description": "Server for handling data format conversions and transformations."
+      "description": "Server for handling data format conversions and transformations (JSON/XML parsing)."
     },
-    "data_operations": {
+    "web": {
       "command": "C:\\Users\\steph\\workspace\\GitHub\\ai\\.venv\\Scripts\\python.exe",
       "args": [
-        "C:\\Users\\steph\\workspace\\GitHub\\ai\\tools\\data_operations_mcp_server\\server.py"
+        "C:\\Users\\steph\\workspace\\GitHub\\ai\\tools\\web_mcp_server\\server.py"
       ],
-      "description": "Server for performing various data operations such as filtering, sorting, and aggregating."
-    },
-    "file_processing": {
-      "command": "C:\\Users\\steph\\workspace\\GitHub\\ai\\.venv\\Scripts\\python.exe",
-      "args": [
-        "C:\\Users\\steph\\workspace\\GitHub\\ai\\tools\\file_processing_mcp_server\\server.py"
-      ],
-      "description": "Server for processing files, including text analysis and data extraction."
-    },
-    "local_file_access": {
-      "command": "C:\\Users\\steph\\workspace\\GitHub\\ai\\.venv\\Scripts\\python.exe",
-      "args": [
-        "C:\\Users\\steph\\workspace\\GitHub\\ai\\tools\\local-file-access\\server.py"
-      ],
-      "description": "Server for accessing local files and directories, similar to the filesystem server but with additional capabilities."
-    },
-    "web_api": {
-      "command": "C:\\Users\\steph\\workspace\\GitHub\\ai\\.venv\\Scripts\\python.exe",
-      "args": [
-        "C:\\Users\\steph\\workspace\\GitHub\\ai\\tools\\web_api_mcp_server\\server.py"
-      ],
-      "description": "Server for interacting with web APIs, allowing data retrieval and manipulation through HTTP requests."
+      "description": "Server for web search (Brave Search API) and fetching web page content."
     }
   }
 }
