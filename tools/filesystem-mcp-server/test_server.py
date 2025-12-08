@@ -1,0 +1,109 @@
+#!/usr/bin/env python3
+"""
+Simple test script for the filesystem MCP server
+"""
+import subprocess
+import json
+import os
+from pathlib import Path
+
+def test_mcp_server():
+    """Test the MCP server by sending JSON-RPC messages"""
+    
+    proc = subprocess.Popen(
+        ["python", "server.py"],
+        stdin=subprocess.PIPE,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        text=True,
+        cwd=os.path.dirname(__file__)
+    )
+    
+    # Initialize the connection
+    init_request = {
+        "jsonrpc": "2.0",
+        "id": 1,
+        "method": "initialize",
+        "params": {
+            "protocolVersion": "2024-11-05",
+            "capabilities": {},
+            "clientInfo": {
+                "name": "test-client",
+                "version": "1.0.0"
+            }
+        }
+    }
+    
+    print("Sending initialize request...")
+    proc.stdin.write(json.dumps(init_request) + "\n")
+    proc.stdin.flush()
+    
+    # Read response
+    response = proc.stdout.readline()
+    print(f"Initialize response: {response}")
+    
+    # List tools
+    list_tools_request = {
+        "jsonrpc": "2.0",
+        "id": 2,
+        "method": "tools/list",
+        "params": {}
+    }
+    
+    print("\nSending tools/list request...")
+    proc.stdin.write(json.dumps(list_tools_request) + "\n")
+    proc.stdin.flush()
+    
+    response = proc.stdout.readline()
+    print(f"Tools list response: {response}")
+    
+    # Test list_directory on the tools directory
+    list_dir_request = {
+        "jsonrpc": "2.0",
+        "id": 3,
+        "method": "tools/call",
+        "params": {
+            "name": "list_directory",
+            "arguments": {
+                "path": r"C:\Users\steph\workspace\GitHub\ai\tools"
+            }
+        }
+    }
+    
+    print("\nListing tools directory...")
+    proc.stdin.write(json.dumps(list_dir_request) + "\n")
+    proc.stdin.flush()
+    
+    response = proc.stdout.readline()
+    print(f"List directory response: {response}")
+    
+    # Test get_file_info
+    file_info_request = {
+        "jsonrpc": "2.0",
+        "id": 4,
+        "method": "tools/call",
+        "params": {
+            "name": "get_file_info",
+            "arguments": {
+                "path": r"C:\Users\steph\workspace\GitHub\ai\tools\filesystem-mcp-server\server.py"
+            }
+        }
+    }
+    
+    print("\nGetting file info...")
+    proc.stdin.write(json.dumps(file_info_request) + "\n")
+    proc.stdin.flush()
+    
+    response = proc.stdout.readline()
+    print(f"File info response: {response}")
+    
+    # Cleanup
+    proc.stdin.close()
+    proc.terminate()
+    proc.wait()
+
+if __name__ == "__main__":
+    print("MCP Filesystem Server Test")
+    print("=" * 50)
+    print()
+    test_mcp_server()

@@ -1,0 +1,40 @@
+{
+  "mcpServers": {
+    "email": {
+      "command": "C:\\Users\\steph\\workspace\\GitHub\\ai\\.venv\\Scripts\\python.exe",
+      "args": [
+        "C:\\Users\\steph\\workspace\\GitHub\\ai\\tools\\email-mcp-server\\server.py"
+      ]
+    },
+    "todoist": {
+      "command": "C:\\Users\\steph\\workspace\\GitHub\\ai\\.venv\\Scripts\\python.exe",
+      "args": [
+        "C:\\Users\\steph\\workspace\\GitHub\\ai\\tools\\todoist-mcp-server\\server.py"
+      ]
+    },
+    "filesystem": {
+      "command": "C:\\Users\\steph\\workspace\\GitHub\\ai\\.venv\\Scripts\\python.exe",
+      "args": [
+        "C:\\Users\\steph\\workspace\\GitHub\\ai\\tools\\filesystem-mcp-server\\server.py"
+      ]
+    },
+    "github": {
+      "command": "C:\\Users\\steph\\workspace\\GitHub\\ai\\.venv\\Scripts\\python.exe",
+      "args": [
+        "C:\\Users\\steph\\workspace\\GitHub\\ai\\tools\\github-mcp-server\\server.py"
+      ]
+    },
+    "git": {
+      "command": "C:\\Users\\steph\\workspace\\GitHub\\ai\\.venv\\Scripts\\python.exe",
+      "args": [
+        "C:\\Users\\steph\\workspace\\GitHub\\ai\\tools\\git-mcp-server\\server.py"
+      ]
+    },
+    "os_info": {
+      "command": "C:\\Users\\steph\\workspace\\GitHub\\ai\\.venv\\Scripts\\python.exe",
+      "args": [
+        "C:\\Users\\steph\\workspace\\GitHub\\ai\\tools\\os_info_mcp_server\\server.py"
+      ]
+    }
+  }
+}
