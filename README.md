@@ -1,5 +1,9 @@
 # 🧠 AI Systems Lab
 
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
+[![Python 3.11+](https://img.shields.io/badge/python-3.11+-blue.svg)](https://www.python.org/downloads/)
+[![Code style: black](https://img.shields.io/badge/code%20style-black-000000.svg)](https://github.com/psf/black)
+
 A collection of **production‑minded AI systems**, tools, and engineering patterns exploring how modern AI integrates with **cloud‑native, secure, and scalable architectures**.  
 This lab is where I design, test, and refine real‑world AI workflows — from agentic systems to RAG pipelines to orchestration tools.
 
@@ -7,7 +11,7 @@ This lab is where I design, test, and refine real‑world AI workflows — from 
 
 ## 🚀 Purpose
 
-I’m a senior software engineer specialising in **AWS, Java/Spring Boot, Python, distributed systems, and secure‑by‑design architecture**.  
+I'm a senior software engineer specialising in **AWS, Java/Spring Boot, Python, distributed systems, and secure‑by‑design architecture**.  
 This repository is my engineering playground for building **AI systems that actually run in production**, not just demos or notebooks.
 
 The goal is simple:  
@@ -23,8 +27,7 @@ ai-systems-lab/
 ├── docker/           # Containerisation and local dev environments
 ├── docs/             # Architecture diagrams, plans, and design notes
 ├── prompts/          # System prompts, agent definitions, prompt patterns
-├── scripts/          # Utility scripts for automation and tooling
-├── tools/            # AI tools, utilities, and workflow components
+├── mcp/              # Model Context Protocol servers
 ├── plan.drawio       # Architecture and planning diagrams
 └── README.md         # You're here
 ```
@@ -77,5 +80,4 @@ Using diagrams, ADRs, and planning documents to explore:
 
 ## 🤝 Contact
 
-I’m currently expanding my work into AI systems engineering as part of my long‑term career direction. If you’re working in this space or have insights to share, you’re welcome to connect with me on **LinkedIn:** https://www.linkedin.com/in/leonarduk
-
+I'm currently expanding my work into AI systems engineering as part of my long‑term career direction. If you're working in this space or have insights to share, you're welcome to connect with me on **LinkedIn:** https://www.linkedin.com/in/leonarduk
