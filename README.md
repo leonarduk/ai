@@ -75,19 +75,6 @@ Using diagrams, ADRs, and planning documents to explore:
 
 ---
 
-## 📍 Roadmap
-
-- [x] Initial repo structure  
-- [x] Add prompts, tools, and scripts  
-- [ ] Add flagship agentic workflow project  
-- [ ] Add RAG pipeline with evaluation  
-- [ ] Add architecture diagrams to `/docs`  
-- [ ] Add README files to each subfolder  
-- [ ] Add deployment examples (AWS + local)  
-- [ ] Add benchmarking and cost analysis experiments  
-
----
-
 ## 🤝 Contact
 
 I’m currently expanding my work into AI systems engineering as part of my long‑term career direction. If you’re working in this space or have insights to share, you’re welcome to connect with me on **LinkedIn:** https://www.linkedin.com/in/leonarduk
