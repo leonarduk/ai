@@ -1,0 +1,74 @@
+# Contributing to AI Systems Lab
+
+Thank you for your interest in this project! 
+
+## About This Repository
+
+This is a **personal portfolio repository** documenting my learning journey into AI systems engineering. While I'm not actively seeking code contributions, I welcome:
+
+- 🐛 Bug reports
+- 💡 Suggestions for improvements
+- 🤔 Questions about implementation decisions
+- 📚 Resources or references that might be helpful
+
+## Reporting Issues
+
+If you spot a bug or have a suggestion:
+
+1. Check if an issue already exists
+2. If not, [open a new issue](../../issues/new)
+3. Provide context:
+   - What you expected to happen
+   - What actually happened
+   - Steps to reproduce (if applicable)
+
+## Suggesting Improvements
+
+I'm particularly interested in feedback on:
+
+- **Architecture decisions**: Are there better patterns I should consider?
+- **Security issues**: Especially in the filesystem and API integrations
+- **Code quality**: Best practices I might have missed
+- **Documentation**: Is anything unclear or missing?
+
+## Questions & Discussion
+
+Feel free to:
+- Open an issue for technical questions
+- Share resources or articles relevant to the projects
+- Point out learning resources you found helpful
+
+## What I'm NOT Looking For
+
+Since this is a learning/portfolio project:
+- ❌ Pull requests with major rewrites
+- ❌ Requests to add new features
+- ❌ Style/formatting nitpicks (unless they impact functionality)
+
+## Code of Conduct
+
+Please be respectful and constructive. This is a learning repository, not a production system. Comments like "you should just use library X" without context aren't helpful - explain the trade-offs!
+
+## Questions?
+
+Feel free to reach out via:
+- **GitHub Issues**: For technical questions about the code
+- **LinkedIn**: [linkedin.com/in/leonarduk](https://www.linkedin.com/in/leonarduk) for general discussion
+
+---
+
+## For Those Building Similar Projects
+
+If you're also learning AI systems engineering and found something useful here:
+
+1. ⭐ Star the repository if you found it helpful
+2. Feel free to use code/patterns with attribution
+3. Share what you learned differently - I'm learning too!
+
+## License
+
+All code in this repository is available under the MIT License. See [LICENSE](./LICENSE) for details.
+
+---
+
+*This is a personal learning project. The goal is demonstrating growth and capability, not building a production framework.*
