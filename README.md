@@ -104,7 +104,6 @@ ai-systems-lab/
 ├── prompts/               # Prompt engineering examples
 ├── docs/                  # Architecture diagrams and guides
 ├── examples/              # Reference implementations
-└── ACTION_PLAN.md        # Development roadmap
 ```
 
 ---
