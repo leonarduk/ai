@@ -26,6 +26,7 @@ GITHUB_TOKEN = os.environ.get("GITHUB_TOKEN")
 
 app = Server("github-server")
 
+
 def get_headers():
     """Get headers for GitHub API requests"""
     token = os.environ.get("GITHUB_TOKEN")
@@ -35,6 +36,7 @@ def get_headers():
         "Authorization": f"Bearer {token}",
         "Accept": "application/vnd.github.v3+json"
     }
+
 
 def parse_repo(repo_url_or_name: str) -> tuple[str, str]:
     """Parse repository into owner and repo name"""
@@ -46,6 +48,7 @@ def parse_repo(repo_url_or_name: str) -> tuple[str, str]:
     else:
         parts = repo_url_or_name.split("/")
         return parts[0], parts[1]
+
 
 @app.list_tools()
 async def list_tools() -> list[Tool]:
@@ -102,6 +105,73 @@ async def list_tools() -> list[Tool]:
         Tool(
             name="get_pull_request",
             description="Get details of a specific pull request",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "repo": {"type": "string", "description": "Repository (owner/repo or URL)"},
+                    "pr_number": {"type": "integer", "description": "Pull request number"}
+                },
+                "required": ["repo", "pr_number"]
+            }
+        ),
+        Tool(
+            name="get_pr_files",
+            description="Get list of files changed in a PR with their diffs and status",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "repo": {"type": "string", "description": "Repository (owner/repo or URL)"},
+                    "pr_number": {"type": "integer", "description": "Pull request number"}
+                },
+                "required": ["repo", "pr_number"]
+            }
+        ),
+        Tool(
+            name="get_pr_diff",
+            description="Get the full unified diff for a pull request",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "repo": {"type": "string", "description": "Repository (owner/repo or URL)"},
+                    "pr_number": {"type": "integer", "description": "Pull request number"}
+                },
+                "required": ["repo", "pr_number"]
+            }
+        ),
+        Tool(
+            name="create_pr_review_comment",
+            description="Add a review comment to a specific line in a PR file",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "repo": {"type": "string", "description": "Repository (owner/repo or URL)"},
+                    "pr_number": {"type": "integer", "description": "Pull request number"},
+                    "body": {"type": "string", "description": "Review comment text"},
+                    "commit_id": {"type": "string", "description": "SHA of the commit to comment on"},
+                    "path": {"type": "string", "description": "Relative path of the file to comment on"},
+                    "line": {"type": "integer", "description": "Line number in the diff to comment on"}
+                },
+                "required": ["repo", "pr_number", "body", "commit_id", "path", "line"]
+            }
+        ),
+        Tool(
+            name="submit_pr_review",
+            description="Submit a PR review with optional comments and approval/request changes/comment event",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "repo": {"type": "string", "description": "Repository (owner/repo or URL)"},
+                    "pr_number": {"type": "integer", "description": "Pull request number"},
+                    "body": {"type": "string", "description": "Overall review comment"},
+                    "event": {"type": "string", "description": "Review action: APPROVE, REQUEST_CHANGES, or COMMENT",
+                              "enum": ["APPROVE", "REQUEST_CHANGES", "COMMENT"]}
+                },
+                "required": ["repo", "pr_number", "event"]
+            }
+        ),
+        Tool(
+            name="list_pr_comments",
+            description="List all review comments on a pull request",
             inputSchema={
                 "type": "object",
                 "properties": {
@@ -178,6 +248,7 @@ async def list_tools() -> list[Tool]:
         )
     ]
 
+
 @app.call_tool()
 async def call_tool(name: str, arguments: dict) -> list[TextContent]:
     try:
@@ -189,7 +260,7 @@ async def call_tool(name: str, arguments: dict) -> list[TextContent]:
             )
             response.raise_for_status()
             data = response.json()
-            
+
             info = {
                 "name": data["name"],
                 "full_name": data["full_name"],
@@ -203,7 +274,7 @@ async def call_tool(name: str, arguments: dict) -> list[TextContent]:
                 "updated_at": data["updated_at"]
             }
             return [TextContent(type="text", text=json.dumps(info, indent=2))]
-        
+
         elif name == "list_branches":
             owner, repo = parse_repo(arguments["repo"])
             response = requests.get(
@@ -213,7 +284,7 @@ async def call_tool(name: str, arguments: dict) -> list[TextContent]:
             response.raise_for_status()
             branches = [b["name"] for b in response.json()]
             return [TextContent(type="text", text="\n".join(branches))]
-        
+
         elif name == "list_pull_requests":
             owner, repo = parse_repo(arguments["repo"])
             state = arguments.get("state", "open")
@@ -223,14 +294,14 @@ async def call_tool(name: str, arguments: dict) -> list[TextContent]:
                 headers=get_headers()
             )
             response.raise_for_status()
-            
+
             prs = []
             for pr in response.json():
                 prs.append(f"#{pr['number']} - {pr['title']} ({pr['state']}) by {pr['user']['login']}")
-            
+
             result = "\n".join(prs) if prs else f"No {state} pull requests found"
             return [TextContent(type="text", text=result)]
-        
+
         elif name == "create_pull_request":
             owner, repo = parse_repo(arguments["repo"])
             data = {
@@ -239,7 +310,7 @@ async def call_tool(name: str, arguments: dict) -> list[TextContent]:
                 "head": arguments["head"],
                 "base": arguments.get("base", "main")
             }
-            
+
             response = requests.post(
                 f"https://api.github.com/repos/{owner}/{repo}/pulls",
                 json=data,
@@ -247,21 +318,21 @@ async def call_tool(name: str, arguments: dict) -> list[TextContent]:
             )
             response.raise_for_status()
             pr = response.json()
-            
+
             result = f"Created PR #{pr['number']}: {pr['title']}\nURL: {pr['html_url']}"
             return [TextContent(type="text", text=result)]
-        
+
         elif name == "get_pull_request":
             owner, repo = parse_repo(arguments["repo"])
             pr_number = arguments["pr_number"]
-            
+
             response = requests.get(
                 f"https://api.github.com/repos/{owner}/{repo}/pulls/{pr_number}",
                 headers=get_headers()
             )
             response.raise_for_status()
             pr = response.json()
-            
+
             info = {
                 "number": pr["number"],
                 "title": pr["title"],
@@ -269,6 +340,7 @@ async def call_tool(name: str, arguments: dict) -> list[TextContent]:
                 "state": pr["state"],
                 "author": pr["user"]["login"],
                 "head": pr["head"]["ref"],
+                "head_sha": pr["head"]["sha"],
                 "base": pr["base"]["ref"],
                 "url": pr["html_url"],
                 "created_at": pr["created_at"],
@@ -277,26 +349,135 @@ async def call_tool(name: str, arguments: dict) -> list[TextContent]:
                 "merged": pr.get("merged", False)
             }
             return [TextContent(type="text", text=json.dumps(info, indent=2))]
-        
+
+        elif name == "get_pr_files":
+            owner, repo = parse_repo(arguments["repo"])
+            pr_number = arguments["pr_number"]
+
+            response = requests.get(
+                f"https://api.github.com/repos/{owner}/{repo}/pulls/{pr_number}/files",
+                headers=get_headers()
+            )
+            response.raise_for_status()
+            files_data = response.json()
+
+            files = []
+            for f in files_data:
+                file_info = {
+                    "filename": f["filename"],
+                    "status": f["status"],
+                    "additions": f["additions"],
+                    "deletions": f["deletions"],
+                    "changes": f["changes"],
+                    "patch": f.get("patch", "")
+                }
+                files.append(file_info)
+
+            return [TextContent(type="text", text=json.dumps(files, indent=2))]
+
+        elif name == "get_pr_diff":
+            owner, repo = parse_repo(arguments["repo"])
+            pr_number = arguments["pr_number"]
+
+            headers = get_headers()
+            headers["Accept"] = "application/vnd.github.v3.diff"
+
+            response = requests.get(
+                f"https://api.github.com/repos/{owner}/{repo}/pulls/{pr_number}",
+                headers=headers
+            )
+            response.raise_for_status()
+
+            return [TextContent(type="text", text=response.text)]
+
+        elif name == "create_pr_review_comment":
+            owner, repo = parse_repo(arguments["repo"])
+            pr_number = arguments["pr_number"]
+
+            data = {
+                "body": arguments["body"],
+                "commit_id": arguments["commit_id"],
+                "path": arguments["path"],
+                "line": arguments["line"]
+            }
+
+            response = requests.post(
+                f"https://api.github.com/repos/{owner}/{repo}/pulls/{pr_number}/comments",
+                json=data,
+                headers=get_headers()
+            )
+            response.raise_for_status()
+            comment = response.json()
+
+            result = f"Created review comment on {arguments['path']}:{arguments['line']}\nURL: {comment['html_url']}"
+            return [TextContent(type="text", text=result)]
+
+        elif name == "submit_pr_review":
+            owner, repo = parse_repo(arguments["repo"])
+            pr_number = arguments["pr_number"]
+
+            data = {
+                "event": arguments["event"]
+            }
+            if "body" in arguments:
+                data["body"] = arguments["body"]
+
+            response = requests.post(
+                f"https://api.github.com/repos/{owner}/{repo}/pulls/{pr_number}/reviews",
+                json=data,
+                headers=get_headers()
+            )
+            response.raise_for_status()
+            review = response.json()
+
+            result = f"Submitted {arguments['event']} review on PR #{pr_number}\nURL: {review['html_url']}"
+            return [TextContent(type="text", text=result)]
+
+        elif name == "list_pr_comments":
+            owner, repo = parse_repo(arguments["repo"])
+            pr_number = arguments["pr_number"]
+
+            response = requests.get(
+                f"https://api.github.com/repos/{owner}/{repo}/pulls/{pr_number}/comments",
+                headers=get_headers()
+            )
+            response.raise_for_status()
+            comments_data = response.json()
+
+            comments = []
+            for c in comments_data:
+                comment_info = {
+                    "id": c["id"],
+                    "author": c["user"]["login"],
+                    "path": c["path"],
+                    "line": c.get("line"),
+                    "body": c["body"],
+                    "created_at": c["created_at"]
+                }
+                comments.append(comment_info)
+
+            return [TextContent(type="text", text=json.dumps(comments, indent=2))]
+
         elif name == "list_issues":
             owner, repo = parse_repo(arguments["repo"])
             state = arguments.get("state", "open")
-            
+
             response = requests.get(
                 f"https://api.github.com/repos/{owner}/{repo}/issues",
                 params={"state": state},
                 headers=get_headers()
             )
             response.raise_for_status()
-            
+
             issues = []
             for issue in response.json():
                 if "pull_request" not in issue:  # Skip PRs
-                    issues.append(f"#{issue['number']} - {issue['title']} ({issue['state']}) by {issue['user']['login']}")
-            
+                    issues.append(
+                        f"#{issue['number']} - {issue['title']} ({issue['state']}) by {issue['user']['login']}")
+
             result = "\n".join(issues) if issues else f"No {state} issues found"
             return [TextContent(type="text", text=result)]
-        
+
         elif name == "create_issue":
             owner, repo = parse_repo(arguments["repo"])
             data = {
@@ -305,7 +486,7 @@ async def call_tool(name: str, arguments: dict) -> list[TextContent]:
             }
             if "labels" in arguments:
                 data["labels"] = arguments["labels"]
-            
+
             response = requests.post(
                 f"https://api.github.com/repos/{owner}/{repo}/issues",
                 json=data,
@@ -313,19 +494,19 @@ async def call_tool(name: str, arguments: dict) -> list[TextContent]:
             )
             response.raise_for_status()
             issue = response.json()
-            
+
             result = f"Created issue #{issue['number']}: {issue['title']}\nURL: {issue['html_url']}"
             return [TextContent(type="text", text=result)]
-        
+
         elif name == "get_file_content":
             owner, repo = parse_repo(arguments["repo"])
             path = arguments["path"]
             ref = arguments.get("ref")
-            
+
             params = {}
             if ref:
                 params["ref"] = ref
-            
+
             response = requests.get(
                 f"https://api.github.com/repos/{owner}/{repo}/contents/{path}",
                 params=params,
@@ -333,34 +514,34 @@ async def call_tool(name: str, arguments: dict) -> list[TextContent]:
             )
             response.raise_for_status()
             data = response.json()
-            
+
             # Decode base64 content
             import base64
             content = base64.b64decode(data["content"]).decode("utf-8")
             return [TextContent(type="text", text=content)]
-        
+
         elif name == "list_commits":
             owner, repo = parse_repo(arguments["repo"])
             params = {"per_page": arguments.get("per_page", 30)}
             if "sha" in arguments:
                 params["sha"] = arguments["sha"]
-            
+
             response = requests.get(
                 f"https://api.github.com/repos/{owner}/{repo}/commits",
                 params=params,
                 headers=get_headers()
             )
             response.raise_for_status()
-            
+
             commits = []
             for commit in response.json():
                 commits.append(
                     f"{commit['sha'][:7]} - {commit['commit']['message'].split(chr(10))[0]} "
                     f"by {commit['commit']['author']['name']}"
                 )
-            
+
             return [TextContent(type="text", text="\n".join(commits))]
-        
+
         elif name == "search_repositories":
             params = {
                 "q": arguments["query"],
@@ -368,26 +549,26 @@ async def call_tool(name: str, arguments: dict) -> list[TextContent]:
             }
             if "sort" in arguments:
                 params["sort"] = arguments["sort"]
-            
+
             response = requests.get(
                 "https://api.github.com/search/repositories",
                 params=params,
                 headers=get_headers()
             )
             response.raise_for_status()
-            
+
             repos = []
             for repo in response.json()["items"]:
                 repos.append(
                     f"{repo['full_name']} - {repo.get('description', 'No description')} "
-                    f"(⭐ {repo['stargazers_count']})"
+                    f"(★ {repo['stargazers_count']})"
                 )
-            
+
             return [TextContent(type="text", text="\n".join(repos))]
-        
+
         else:
             return [TextContent(type="text", text=f"Unknown tool: {name}")]
-    
+
     except requests.exceptions.HTTPError as e:
         error_msg = f"GitHub API error: {e.response.status_code}"
         try:
@@ -396,19 +577,21 @@ async def call_tool(name: str, arguments: dict) -> list[TextContent]:
         except:
             pass
         return [TextContent(type="text", text=error_msg)]
-    
+
     except Exception as e:
         return [TextContent(type="text", text=f"Error: {str(e)}")]
 
+
 async def main():
     from mcp.server.stdio import stdio_server
-    
+
     async with stdio_server() as (read_stream, write_stream):
         await app.run(
             read_stream,
             write_stream,
             app.create_initialization_options()
         )
+
 
 if __name__ == "__main__":
     asyncio.run(main())
