@@ -1,4 +1,26 @@
+# Example Jenkinsfile from Separate Project
 
+**Note:** This Jenkinsfile is from the `allotmint` project and is kept here as a reference example of CI/CD pipeline configuration.
+
+## What This Shows
+
+This demonstrates a multi-language CI/CD pipeline pattern:
+- Parallel test execution (Python, Node.js, Java)
+- Docker-based build agents
+- Code coverage reporting
+- Conditional stages
+
+## Original Source
+
+From: `https://github.com/leonarduk/allotmint`
+
+This is NOT the CI/CD for ai-systems-lab. For this repository's CI/CD, see `.github/workflows/` (when implemented).
+
+---
+
+## The Jenkinsfile
+
+```groovy
 pipeline {
     agent none
 
@@ -23,7 +45,7 @@ pipeline {
                 stage('Python Tests') {
                     agent {
                         docker {
-                            image 'python:3.11'
+                            image: 'python:3.11'
                             args '-u root'
                         }
                     }
@@ -56,7 +78,7 @@ pipeline {
                 stage('Node.js Build') {
                     agent {
                         docker {
-                            image 'node:20'
+                            image: 'node:20'
                             args '-u root'
                         }
                     }
@@ -77,7 +99,7 @@ pipeline {
                     }
                     agent {
                         docker {
-                            image 'maven:3.9.6-eclipse-temurin-17'
+                            image: 'maven:3.9.6-eclipse-temurin-17'
                             args '-u root'
                         }
                     }
@@ -92,3 +114,12 @@ pipeline {
         }
     }
 }
+```
+
+## Adaptation Notes
+
+If adapting this for ai-systems-lab:
+1. Update repository URL to this repo
+2. Adjust test commands for MCP servers
+3. Remove Node.js and Java stages (Python only)
+4. Consider GitHub Actions instead (more modern)
