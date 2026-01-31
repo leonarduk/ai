@@ -45,5 +45,3 @@ logs/
 Thumbs.db
 Desktop.ini
 
-# Project specific
-*.drawio.bkp
