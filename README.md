@@ -1,10 +1,11 @@
-# 🧠 AI Systems Lab
+# AI Systems Lab
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
+[![GitHub last commit](https://img.shields.io/github/last-commit/leonarduk/ai-systems-lab)](https://github.com/leonarduk/ai-systems-lab)
+[![GitHub repo size](https://img.shields.io/github/repo-size/leonarduk/ai-systems-lab)](https://github.com/leonarduk/ai-systems-lab)
 [![Python 3.11+](https://img.shields.io/badge/python-3.11+-blue.svg)](https://www.python.org/downloads/)
-[![Code style: black](https://img.shields.io/badge/code%20style-black-000000.svg)](https://github.com/psf/black)
 
-**Senior software engineer exploring AI systems through hands-on implementation.**
+**Personal portfolio demonstrating AI systems engineering capabilities.**
 
 This repository documents my transition into AI systems engineering. Rather than just theory, I'm building production-quality tools and learning by doing.
 

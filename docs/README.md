@@ -22,7 +22,7 @@ Additional reference PDFs and documentation are stored locally in:
 /PRIVATE/reference-materials/
 ```
 
-This directory is gitignored to keep the repository lean. Reference materials include:
+This directory is gitignored to keep the repository lean. Reference materials could include:
 - Model comparison charts
 - Research papers
 - External documentation
