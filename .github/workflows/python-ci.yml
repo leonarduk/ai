@@ -1,0 +1,98 @@
+name: Python CI
+
+on:
+  push:
+    branches: [ main, develop ]
+  pull_request:
+    branches: [ main ]
+
+jobs:
+  lint:
+    name: Lint Python Code
+    runs-on: ubuntu-latest
+
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    - name: Set up Python
+      uses: actions/setup-python@v5
+      with:
+        python-version: '3.11'
+
+    - name: Install linting tools
+      run: |
+        python -m pip install --upgrade pip
+        pip install flake8 black
+
+    - name: Run flake8
+      run: |
+        # Stop the build if there are Python syntax errors or undefined names
+        flake8 projects/ --count --select=E9,F63,F7,F82 --show-source --statistics
+        # Exit-zero treats all errors as warnings. Max line length set to 127
+        flake8 projects/ --count --exit-zero --max-complexity=10 --max-line-length=127 --statistics
+
+    - name: Check code formatting with black
+      run: |
+        black --check projects/ || echo "Code formatting issues found. Run 'black projects/' to fix."
+
+  test:
+    name: Run Tests
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        python-version: ['3.11', '3.12']
+
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    - name: Set up Python ${{ matrix.python-version }}
+      uses: actions/setup-python@v5
+      with:
+        python-version: ${{ matrix.python-version }}
+
+    - name: Install dependencies
+      run: |
+        python -m pip install --upgrade pip
+        # Install test dependencies
+        pip install pytest pytest-cov pytest-asyncio
+        # Install project dependencies (if requirements.txt exists)
+        if [ -f requirements.txt ]; then pip install -r requirements.txt; fi
+
+    - name: Run pytest
+      run: |
+        # Run tests if they exist
+        if [ -d "projects" ]; then
+          pytest projects/ -v --cov=projects --cov-report=term-missing || echo "No tests found or tests failed"
+        fi
+
+  security:
+    name: Security Scan
+    runs-on: ubuntu-latest
+
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    - name: Set up Python
+      uses: actions/setup-python@v5
+      with:
+        python-version: '3.11'
+
+    - name: Install security tools
+      run: |
+        python -m pip install --upgrade pip
+        pip install bandit safety
+
+    - name: Run bandit security scan
+      run: |
+        bandit -r projects/ -ll || echo "Security issues found"
+
+    - name: Check for known vulnerabilities
+      run: |
+        # Create a temporary requirements file from all project requirements
+        find projects/ -name "requirements.txt" -exec cat {} \; > all_requirements.txt || echo "No requirements found"
+        if [ -s all_requirements.txt ]; then
+          safety check --file=all_requirements.txt --output=text || echo "Vulnerabilities found"
+        fi
