@@ -1,0 +1,57 @@
+version: '3.8'
+
+services:
+  # Jenkins server for local CI/CD
+  jenkins:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: ai-systems-lab-jenkins
+    user: root
+    ports:
+      - "8080:8080"      # Jenkins UI
+      - "50000:50000"    # Agent communication
+    volumes:
+      - jenkins_home:/var/jenkins_home
+      - /var/run/docker.sock:/var/run/docker.sock  # Docker-in-Docker
+      - ../:/workspace:ro  # Read-only mount of repo for testing
+    environment:
+      - JAVA_OPTS=-Djenkins.install.runSetupWizard=false
+    restart: unless-stopped
+    networks:
+      - ai-lab-network
+    healthcheck:
+      test: ["CMD-SHELL", "curl -f http://localhost:8080 || exit 1"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+
+  # Optional: Local artifact repository
+  # Uncomment if you want to store build artifacts locally
+  # nexus:
+  #   image: sonatype/nexus3:latest
+  #   container_name: ai-systems-lab-nexus
+  #   ports:
+  #     - "8081:8081"
+  #   volumes:
+  #     - nexus_data:/nexus-data
+  #   networks:
+  #     - ai-lab-network
+  #   restart: unless-stopped
+
+volumes:
+  jenkins_home:
+    driver: local
+  # nexus_data:
+  #   driver: local
+
+networks:
+  ai-lab-network:
+    driver: bridge
+
+# Usage:
+# 1. Start: docker-compose up -d
+# 2. Get initial admin password: docker exec ai-systems-lab-jenkins cat /var/jenkins_home/secrets/initialAdminPassword
+# 3. Access: http://localhost:8080
+# 4. Stop: docker-compose down
+# 5. Clean rebuild: docker-compose down -v && docker-compose up -d --build
