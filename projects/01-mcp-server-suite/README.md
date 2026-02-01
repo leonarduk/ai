@@ -88,49 +88,78 @@ See [ADR-001](./docs/adr-001-multi-server-architecture.md) for detailed decision
 
 ## Quick Start
 
-### Prerequisites
-- Python 3.11+
-- pip and virtualenv
+### Try It Out (5 Minutes)
 
-### Installation
+Get the GitHub MCP server running:
 
 ```bash
-# Create virtual environment
-python -m venv .venv
-source .venv/bin/activate  # On Windows: .venv\Scripts\activate
+# 1. Clone and navigate
+git clone https://github.com/leonarduk/ai-systems-lab.git
+cd ai-systems-lab/projects/01-mcp-server-suite/servers/github-mcp-server
 
-# Install dependencies
-cd servers/github-mcp-server
+# 2. Create virtual environment
+python -m venv .venv
+source .venv/bin/activate  # Windows: .venv\Scripts\activate
+
+# 3. Install dependencies
 pip install -r requirements.txt
-# Repeat for other servers as needed
+
+# 4. Set up your GitHub token
+export GITHUB_TOKEN="your_github_token_here"  # Windows: set GITHUB_TOKEN=your_token
+
+# 5. Run the server
+python server.py
 ```
 
-### Configuration
+**Get a GitHub token:** https://github.com/settings/tokens (need `repo` scope)
 
-Create `.env` file in project root:
+### Full Configuration
+
+For all servers, create `.env` file in project root:
 
 ```bash
 # GitHub API
-GITHUB_TOKEN=your_github_token_here
+GITHUB_TOKEN=ghp_xxxxxxxxxxxxxxxxxxxx
 
 # Brave Search API (2000 free queries/month)
-BRAVE_API_KEY=your_brave_api_key_here
+# Get key at: https://brave.com/search/api/
+BRAVE_API_KEY=BSAxxxxxxxxxxxxxxxxxxxx
 
-# Email/SMTP
+# Email/SMTP (Gmail example)
 SMTP_HOST=smtp.gmail.com
 SMTP_PORT=587
 SMTP_USER=your-email@gmail.com
-SMTP_PASSWORD=your-app-password
+SMTP_PASSWORD=your-app-password  # Get from Google Account settings
 
 # Todoist
 TODOIST_EMAIL=your-unique-email@todoist.com
 ```
 
-### Running a Server
+### Running Other Servers
 
 ```bash
-cd servers/github-mcp-server
+# Filesystem server (no API key needed)
+cd servers/filesystem-mcp-server
 python server.py
+
+# Web search server (needs Brave API key)
+cd servers/web_mcp_server
+python server.py
+
+# See individual server READMEs for specific requirements
+```
+
+### Testing It Works
+
+Each server includes a simple test client:
+
+```bash
+# Test the GitHub server
+cd servers/github-mcp-server
+python -c "import server; print('Server loaded successfully')"
+
+# Or run the test suite
+pytest tests/ -v
 ```
 
 ## Development
