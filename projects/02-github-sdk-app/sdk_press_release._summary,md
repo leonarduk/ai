@@ -1,0 +1,44 @@
+# Summary: GitHub Copilot SDK Announcement
+
+## Overview
+GitHub has released the **GitHub Copilot SDK** (technical preview), enabling developers to build AI agents, tools, and workflows directly into their own applications. The SDK exposes the same agentic engine that powers GitHub Copilot CLI.
+
+## Why It Matters
+Building agentic systems normally requires significant scaffolding:
+- Context management  
+- Multi-step planning  
+- Tool orchestration  
+- Model routing  
+- Error handling  
+- Memory persistence  
+
+The Copilot SDK abstracts these complexities, letting developers focus on the logic of their AI tools rather than the infrastructure.
+
+## Key Capabilities
+The SDK provides programmatic access to Copilot’s agent runtime, including:
+- **Multi-step sessions** (not just single prompts)
+- **Multi-model support**
+- **Built-in tool orchestration** via MCP servers
+- **Error recovery** and **persistent memory**
+- **Custom agents** you can build or import from the community
+
+## Supported Languages
+Initial technical preview includes:
+- Node.js / TypeScript  
+- Python  
+- Go  
+- .NET  
+
+## Where It Can Be Used
+The SDK can be embedded into:
+- CLI tools  
+- IDE extensions  
+- Web apps  
+- Desktop apps  
+- Internal tools  
+- SaaS platforms  
+
+Essentially, anywhere you want an AI agent to run.
+
+## Getting Started
+GitHub directs developers to the `github/copilot-sdk` repository
