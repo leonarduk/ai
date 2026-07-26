@@ -6,7 +6,9 @@ on:
 
 jobs:
   ai-review:
-    if: ${{ github.actor != 'dependabot[bot]' && vars.ENABLE_GPT_REVIEW != 'false' }}
+    # Skip (not fail) when OPENAI_API_KEY isn't set yet, so an incomplete
+    # secrets setup doesn't turn into a failing required check.
+    if: ${{ github.actor != 'dependabot[bot]' && vars.ENABLE_GPT_REVIEW != 'false' && secrets.OPENAI_API_KEY != '' }}
     permissions:
       pull-requests: write
       contents: read

@@ -27,8 +27,11 @@ jobs:
     # model below, and removing it triggers a run that reverts to the
     # defaults (since `contains(...)` on the current labels is then false).
     # Any other label add/remove is ignored.
+    # Skip (not fail) when DEEPSEEK_API_KEY isn't set yet, so an incomplete
+    # secrets setup doesn't turn into a failing required check.
     if: >-
       ${{ github.actor != 'dependabot[bot]' && vars.ENABLE_DEEPSEEK_REVIEW != 'false' &&
+      secrets.DEEPSEEK_API_KEY != '' &&
       (github.event.action != 'labeled' && github.event.action != 'unlabeled' ||
       github.event.label.name == 'Deep Review Required') }}
     permissions:
