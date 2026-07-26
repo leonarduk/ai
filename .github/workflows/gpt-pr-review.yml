@@ -5,10 +5,26 @@ on:
     types: [opened, reopened, synchronize]
 
 jobs:
+  # `secrets` isn't a valid context in a job's `if:` (only github/vars/needs/inputs
+  # are), so checking whether OPENAI_API_KEY is set has to happen in a step (where
+  # secrets *can* be read via env) and be surfaced as a job output for the real job's
+  # `if:` to depend on via `needs`.
+  check-secret:
+    if: ${{ github.actor != 'dependabot[bot]' && vars.ENABLE_GPT_REVIEW != 'false' }}
+    runs-on: ubuntu-latest
+    outputs:
+      has_key: ${{ steps.check.outputs.has_key }}
+    steps:
+      - id: check
+        env:
+          KEY: ${{ secrets.OPENAI_API_KEY }}
+        run: echo "has_key=$([ -n "$KEY" ] && echo true || echo false)" >> "$GITHUB_OUTPUT"
+
   ai-review:
+    needs: check-secret
     # Skip (not fail) when OPENAI_API_KEY isn't set yet, so an incomplete
     # secrets setup doesn't turn into a failing required check.
-    if: ${{ github.actor != 'dependabot[bot]' && vars.ENABLE_GPT_REVIEW != 'false' && secrets.OPENAI_API_KEY != '' }}
+    if: ${{ needs.check-secret.outputs.has_key == 'true' }}
     permissions:
       pull-requests: write
       contents: read
