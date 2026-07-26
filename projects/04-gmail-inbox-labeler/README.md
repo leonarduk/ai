@@ -32,9 +32,13 @@ Re-running the script is safe: it only ever queries `in:inbox` (or a custom
 3. Make sure [Ollama](https://ollama.com) is running locally with a model
    pulled, e.g.:
    ```bash
-   ollama pull llama3
+   ollama pull qwen2.5-coder:14b
    ollama serve
    ```
+   Small models (~3B, e.g. `llama3.2`) tend to pick several loosely-related
+   labels per email when given a large/nested label set - a ~7B+ model gives
+   much more precise, usually single-label results. Always check a
+   `--dry-run` against your real inbox and label set before a live run.
 4. Copy `.env.example` to `.env` and adjust as needed.
 
 The first run opens a browser window for the Gmail OAuth consent screen and
