@@ -21,9 +21,6 @@ Email:
 From: {sender}
 Subject: {subject}
 Snippet: {snippet}
-
-Respond with ONLY a JSON array of the chosen label names, e.g. ["Work"] or
-["Work", "Urgent"] or [] if none apply. Do not include any other text.
 """
 
 
@@ -38,20 +35,42 @@ def _build_prompt(subject: str, sender: str, snippet: str, labels: list[str]) ->
     )
 
 
+def _response_schema(valid_labels: list[str]) -> dict:
+    """Ollama structured-output schema constraining the model to a JSON
+    object of the form {"labels": [...]}, with each item restricted to one
+    of the account's real label names. Plain `format: "json"` only
+    guarantees *some* JSON object back (e.g. {"Work": true}), not this
+    shape, so the schema is required for reliable parsing."""
+    return {
+        "type": "object",
+        "properties": {
+            "labels": {
+                "type": "array",
+                "items": {"type": "string", "enum": valid_labels},
+            }
+        },
+        "required": ["labels"],
+    }
+
+
 def _parse_labels(raw_text: str, valid_labels: list[str]) -> list[str]:
-    """Parse the model's JSON array response and keep only labels that
-    exactly match (case-insensitively) one of the known valid labels."""
+    """Parse the model's {"labels": [...]} response and keep only labels
+    that exactly match (case-insensitively) one of the known valid labels."""
     lookup = {label.lower(): label for label in valid_labels}
     try:
         parsed = json.loads(raw_text.strip())
     except json.JSONDecodeError:
         return []
 
-    if not isinstance(parsed, list):
+    if not isinstance(parsed, dict):
+        return []
+
+    items = parsed.get("labels")
+    if not isinstance(items, list):
         return []
 
     chosen = []
-    for item in parsed:
+    for item in items:
         if not isinstance(item, str):
             continue
         match = lookup.get(item.strip().lower())
@@ -83,7 +102,7 @@ def classify_email(
                 "model": model,
                 "prompt": prompt,
                 "stream": False,
-                "format": "json",
+                "format": _response_schema(labels),
             },
             timeout=timeout,
         )
