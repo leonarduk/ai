@@ -25,6 +25,10 @@ ENV/
 .env.local
 .env.*.local
 
+# Gmail OAuth secrets/tokens
+credentials.json
+token.json
+
 # Testing
 .pytest_cache/
 .coverage
