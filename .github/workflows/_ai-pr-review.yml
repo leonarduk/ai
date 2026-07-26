@@ -41,8 +41,12 @@ on:
         default: ""
     secrets:
       anthropic_api_key:
+        # Not required: a DeepSeek- or GPT-only setup (no Claude key) must still be able
+        # to invoke this reusable workflow. Individual scripts that need this key
+        # (claude_review.py, and create_followup_issues.py when FOLLOWUP_LLM_PROVIDER=claude)
+        # fail with a clear error via review_common.get_required_env() if it's unset but needed.
         description: "Anthropic API key, used for Claude reviews and follow-up issue creation"
-        required: true
+        required: false
       openai_api_key:
         description: "OpenAI API key, used for GPT reviews"
         required: false
