@@ -45,6 +45,16 @@ Since this is a learning/portfolio project:
 - ❌ Requests to add new features
 - ❌ Style/formatting nitpicks (unless they impact functionality)
 
+## Automated PR Review
+
+Every pull request is automatically reviewed by Claude, DeepSeek, and GPT (see
+`.github/workflows/*-pr-review.yml`). Each posts an advisory review comment with
+an APPROVE / REQUEST CHANGES verdict; a provider can be disabled repo-wide via
+its `ENABLE_<PROVIDER>_REVIEW` repository variable. Add the `Deep Review
+Required` label to a PR to opt DeepSeek into a stronger model with a larger
+token budget. Approved PRs may get non-blocking follow-ups auto-filed as
+issues labeled `ai-suggested`.
+
 ## Code of Conduct
 
 Please be respectful and constructive. This is a learning repository, not a production system. Comments like "you should just use library X" without context aren't helpful - explain the trade-offs!
