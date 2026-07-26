@@ -9,10 +9,15 @@ DEFAULT_HOST = "http://localhost:11434"
 DEFAULT_MODEL = "llama3"
 DEFAULT_TIMEOUT = 60
 
-_PROMPT_TEMPLATE = """You are an email triage assistant. Choose which of the
-following labels this email belongs to. You may choose zero, one, or several
-labels. Only choose from the exact label names listed below - never invent a
-new label.
+_PROMPT_TEMPLATE = """You are a careful email triage assistant. Choose the
+single best-matching label for this email from the list below. Only choose
+from the exact label names listed - never invent a new label.
+
+Rules:
+- Prefer exactly ONE label: the most specific one that clearly applies.
+- Only add a second label if the email genuinely belongs in both.
+- If you are not confident any label clearly applies, return an empty list.
+  Leaving an email unlabeled is better than guessing.
 
 Available labels:
 {labels}
