@@ -67,6 +67,13 @@ jobs:
         #     pytest's default import mode can't disambiguate)
         #   - missing dependencies (a project's own requirements.txt was
         #     never installed when only a root requirements.txt was checked)
+        # git-mcp-server's integration test is excluded: it hardcodes a
+        # specific developer's local Windows path (not a temp repo) and
+        # performs live git commits against it, so it can never pass in CI
+        # or on any other machine. Tracked as a follow-up to fix properly
+        # rather than papered over here.
+        EXCLUDE_ARGS="--ignore=projects/01-mcp-server-suite/servers/git-mcp-server/test_git_server_integration.py"
+
         overall_status=0
         for req in $(find projects -iname "requirements.txt" -not -path "*/.venv/*"); do
           dir=$(dirname "$req")
@@ -74,7 +81,7 @@ jobs:
           pip install -r "$req"
 
           if find "$dir" -maxdepth 2 \( -iname "test_*.py" -o -iname "*_test.py" \) | grep -q .; then
-            pytest "$dir" -v --cov="$dir" --cov-report=term-missing
+            pytest "$dir" -v --cov="$dir" --cov-report=term-missing $EXCLUDE_ARGS
             status=$?
             if [ "$status" -ne 0 ]; then
               echo "::error::Tests failed in $dir"
