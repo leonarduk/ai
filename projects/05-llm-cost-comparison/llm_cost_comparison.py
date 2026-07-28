@@ -257,7 +257,11 @@ def render_table(rows: list) -> str:
         )
     cheapest = rows_sorted[0]
     most_expensive = rows_sorted[-1]
-    if most_expensive.monthly_cost > 0 and cheapest.monthly_cost > 0:
+    if (
+        len(rows_sorted) > 1
+        and most_expensive.monthly_cost > 0
+        and cheapest.monthly_cost > 0
+    ):
         multiple = most_expensive.monthly_cost / cheapest.monthly_cost
         lines.append("")
         lines.append(
@@ -514,10 +518,21 @@ def prompt_yes_no(prompt: str, default: bool = True) -> bool:
 
 def interactive_workload() -> Workload:
     print("\n== Workload ==")
-    requests_per_day = prompt_float("Requests per day", default=1000)
-    avg_input = prompt_float("Average input tokens per request", default=500)
-    avg_output = prompt_float("Average output tokens per request", default=300)
-    return Workload(requests_per_day, avg_input, avg_output)
+    while True:
+        requests_per_day = prompt_float("Requests per day", default=1000, minimum=0)
+        avg_input = prompt_float(
+            "Average input tokens per request", default=500, minimum=0
+        )
+        avg_output = prompt_float(
+            "Average output tokens per request", default=300, minimum=0
+        )
+        workload = Workload(requests_per_day, avg_input, avg_output)
+        if workload.monthly_total_tokens > 0:
+            return workload
+        print(
+            "  That produces zero total tokens/month — set requests per day and at "
+            "least one of input/output tokens above zero. Let's try again."
+        )
 
 
 def interactive_local_setup() -> Callable[[Workload], ComparisonRow]:

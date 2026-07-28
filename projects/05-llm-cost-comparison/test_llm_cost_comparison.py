@@ -813,3 +813,38 @@ def test_run_non_interactive_allows_zero_output_tokens_for_input_only_workload(
     exit_code = m.run_non_interactive(config_path, export_fmt=None, export_path=None)
     assert exit_code == 0
     assert "Claude Opus 5" in capsys.readouterr().out
+
+
+# --------------------------------------------------------------------------
+# interactive_workload zero-token guard
+# --------------------------------------------------------------------------
+
+
+def test_interactive_workload_reprompts_on_zero_total_tokens(monkeypatch, capsys):
+    # First pass: requests_per_day=0 -> zero total tokens, must reprompt.
+    # Second pass: valid answers.
+    answers = iter(["0", "500", "300", "1000", "500", "300"])
+    monkeypatch.setattr("builtins.input", lambda _: next(answers))
+
+    workload = m.interactive_workload()
+
+    assert workload.requests_per_day == 1000
+    assert workload.monthly_total_tokens > 0
+    assert "zero total tokens" in capsys.readouterr().out
+
+
+def test_interactive_workload_accepts_zero_output_tokens_alone(monkeypatch):
+    # avg_output_tokens == 0 alone is fine as long as total tokens is positive.
+    answers = iter(["1000", "500", "0"])
+    monkeypatch.setattr("builtins.input", lambda _: next(answers))
+
+    workload = m.interactive_workload()
+    assert workload.avg_output_tokens == 0
+    assert workload.monthly_total_tokens > 0
+
+
+def test_render_table_omits_multiple_line_for_single_row():
+    rows = [m.ComparisonRow("Only option", 42.0, 1.0)]
+    table = m.render_table(rows)
+    assert "Only option" in table
+    assert "most expensive option is" not in table
