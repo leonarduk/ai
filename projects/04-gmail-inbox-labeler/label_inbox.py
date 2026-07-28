@@ -95,6 +95,7 @@ def run(
     ollama_host: str,
     credentials_path: str,
     token_path: str,
+    target_labels: list[str] | None = None,
 ) -> None:
     service = get_gmail_service(credentials_path, token_path)
 
@@ -102,7 +103,21 @@ def run(
     if not label_name_to_id:
         logger.warning("No user labels found in this Gmail account. Nothing to classify into.")
         return
-    label_names = list(label_name_to_id.keys())
+
+    if target_labels:
+        lookup = {name.lower(): name for name in label_name_to_id}
+        label_names = []
+        for wanted in target_labels:
+            match = lookup.get(wanted.strip().lower())
+            if not match:
+                logger.warning("Requested label '%s' not found in Gmail account; ignoring.", wanted)
+                continue
+            label_names.append(match)
+        if not label_names:
+            logger.error("None of the requested --labels matched an existing Gmail label. Aborting.")
+            return
+    else:
+        label_names = list(label_name_to_id.keys())
 
     message_ids = list_inbox_message_ids(service, query, max_results)
     logger.info("Found %d inbox message(s) matching query '%s'", len(message_ids), query)
@@ -169,6 +184,15 @@ def parse_args(argv=None) -> argparse.Namespace:
         help="Log the label decisions without modifying any message",
     )
     parser.add_argument(
+        "--labels",
+        default=os.getenv("GMAIL_TARGET_LABELS", ""),
+        help=(
+            "Comma-separated list of existing Gmail labels to restrict classification to "
+            "(e.g. 'Finances/Job Hunt'). If omitted, every user label in the account is "
+            "offered to the model as a candidate."
+        ),
+    )
+    parser.add_argument(
         "--model",
         default=os.getenv("OLLAMA_MODEL", DEFAULT_MODEL),
         help="Local Ollama model to use for classification",
@@ -203,6 +227,7 @@ def main(argv=None) -> None:
         level=logging.DEBUG if args.verbose else logging.INFO,
         format="%(asctime)s %(levelname)s %(message)s",
     )
+    target_labels = [name for name in args.labels.split(",") if name.strip()]
     run(
         query=args.query,
         max_results=args.max_results,
@@ -211,6 +236,7 @@ def main(argv=None) -> None:
         ollama_host=args.ollama_host,
         credentials_path=args.credentials,
         token_path=args.token,
+        target_labels=target_labels or None,
     )
 
 
