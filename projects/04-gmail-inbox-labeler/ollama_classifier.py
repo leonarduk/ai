@@ -18,6 +18,14 @@ Rules:
 - Only add a second label if the email genuinely belongs in both.
 - If you are not confident any label clearly applies, return an empty list.
   Leaving an email unlabeled is better than guessing.
+- Label names may include a folder path (e.g. "Finances/Job Hunt") purely for
+  organizational purposes. Do NOT match on individual words in that path
+  (e.g. "Finances", "Personal"). Judge relevance only from the label's full,
+  specific meaning and the actual email content below. For example,
+  "Finances/Job Hunt" means recruiter outreach, job postings, job-search
+  alerts, or application/interview updates - it does NOT mean general
+  finance news, bills, stock-market updates, cashback, or shopping offers,
+  even though the word "Finances" appears in the path.
 
 Available labels:
 {labels}
@@ -108,6 +116,7 @@ def classify_email(
                 "prompt": prompt,
                 "stream": False,
                 "format": _response_schema(labels),
+                "options": {"temperature": 0},
             },
             timeout=timeout,
         )
