@@ -330,6 +330,15 @@ def build_local_row(
         raise ValueError(f"Unknown local cost mode: {mode!r}")
     per_million = cost_per_million_tokens(monthly_cost, workload.monthly_total_tokens)
     notes = f"~{hours_needed:.1f} compute-hrs/month at {tokens_per_sec:.1f} tok/s"
+    if hours_needed > HOURS_PER_MONTH:
+        parallel_needed = hours_needed / HOURS_PER_MONTH
+        notes += (
+            f" — ⚠️ exceeds the {HOURS_PER_MONTH:.0f} hours in a month: this "
+            f"throughput can't keep up with the workload in real time (would need "
+            f"~{parallel_needed:.1f}x the capacity, e.g. that many machines running "
+            "in parallel); the cost above is what that much compute would cost, not "
+            "what one machine running 24/7 costs"
+        )
     return ComparisonRow(name, monthly_cost, per_million, notes)
 
 

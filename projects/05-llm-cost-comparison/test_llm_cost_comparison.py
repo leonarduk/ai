@@ -135,6 +135,34 @@ def test_build_local_row_owned():
     assert "compute-hrs/month" in row.notes
 
 
+def test_build_local_row_flags_when_throughput_cannot_keep_up_in_real_time():
+    # A huge workload against a slow tokens/sec needs more compute-hours than
+    # exist in a month — the cost is still computed, but must say so plainly
+    # rather than presenting an unattainable number as an ordinary monthly bill.
+    w = m.Workload(requests_per_day=50000, avg_input_tokens=500, avg_output_tokens=300)
+    row = m.build_local_row(
+        w,
+        tokens_per_sec=7.7,
+        mode="existing",
+        power_watts=100,
+        electricity_rate_per_kwh=0.15,
+    )
+    assert "can't keep up" in row.notes
+    assert "exceeds" in row.notes
+
+
+def test_build_local_row_no_warning_when_throughput_is_sufficient():
+    w = m.Workload(requests_per_day=100, avg_input_tokens=500, avg_output_tokens=500)
+    row = m.build_local_row(
+        w,
+        tokens_per_sec=100,
+        mode="existing",
+        power_watts=100,
+        electricity_rate_per_kwh=0.15,
+    )
+    assert "can't keep up" not in row.notes
+
+
 def test_build_local_row_rented():
     w = m.Workload(requests_per_day=100, avg_input_tokens=500, avg_output_tokens=500)
     row = m.build_local_row(w, tokens_per_sec=100, mode="rent", hourly_rate=2.0)
