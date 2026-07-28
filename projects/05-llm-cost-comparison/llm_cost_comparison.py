@@ -33,7 +33,7 @@ import sys
 import time
 import urllib.error
 import urllib.request
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Callable, Optional
 
@@ -105,7 +105,9 @@ def hosted_monthly_cost(
     )
 
 
-def hours_needed_for_workload(total_monthly_tokens: float, tokens_per_sec: float) -> float:
+def hours_needed_for_workload(
+    total_monthly_tokens: float, tokens_per_sec: float
+) -> float:
     """Compute-hours per month required to generate the workload's tokens.
 
     Assumes the local/rented GPU only needs to run while actively producing
@@ -144,7 +146,9 @@ def local_monthly_cost_owned(
     return hardware_monthly + variable_monthly
 
 
-def local_monthly_cost_rented(hourly_rate: float, hours_needed_per_month: float) -> float:
+def local_monthly_cost_rented(
+    hourly_rate: float, hours_needed_per_month: float
+) -> float:
     """Monthly cost for a rented cloud GPU billed per hour of usage."""
     return hourly_rate * hours_needed_per_month
 
@@ -184,10 +188,16 @@ def build_local_row(
     electricity_rate_per_kwh: float = 0.0,
     hourly_rate: float = 0.0,
 ) -> ComparisonRow:
-    hours_needed = hours_needed_for_workload(workload.monthly_total_tokens, tokens_per_sec)
+    hours_needed = hours_needed_for_workload(
+        workload.monthly_total_tokens, tokens_per_sec
+    )
     if mode == "own":
         monthly_cost = local_monthly_cost_owned(
-            hardware_cost, lifetime_years, power_watts, electricity_rate_per_kwh, hours_needed
+            hardware_cost,
+            lifetime_years,
+            power_watts,
+            electricity_rate_per_kwh,
+            hours_needed,
         )
         name = "Local (owned hardware)"
     elif mode == "rent":
@@ -200,7 +210,9 @@ def build_local_row(
     return ComparisonRow(name, monthly_cost, per_million, notes)
 
 
-def build_hosted_rows(workload: Workload, pricing: dict, selected: Optional[set] = None) -> list:
+def build_hosted_rows(
+    workload: Workload, pricing: dict, selected: Optional[set] = None
+) -> list:
     """Build a ComparisonRow for each hosted model in ``pricing``.
 
     ``selected`` is an optional set of ``"provider/model"`` keys to restrict
@@ -214,7 +226,9 @@ def build_hosted_rows(workload: Workload, pricing: dict, selected: Optional[set]
         monthly_cost = hosted_monthly_cost(
             workload, model_info["input_per_million"], model_info["output_per_million"]
         )
-        per_million = cost_per_million_tokens(monthly_cost, workload.monthly_total_tokens)
+        per_million = cost_per_million_tokens(
+            monthly_cost, workload.monthly_total_tokens
+        )
         display = model_info.get("display_name", full_key)
         rows.append(ComparisonRow(display, monthly_cost, per_million))
     return rows
@@ -226,16 +240,21 @@ def render_table(rows: list) -> str:
         return "(no rows to display)"
     rows_sorted = sorted(rows, key=lambda r: r.monthly_cost)
     name_w = max(len("Option"), max(len(r.name) for r in rows_sorted))
-    cost_w = max(len("Monthly cost"), max(len(f"${r.monthly_cost:,.2f}") for r in rows_sorted))
+    cost_w = max(
+        len("Monthly cost"), max(len(f"${r.monthly_cost:,.2f}") for r in rows_sorted)
+    )
     per_m_w = max(
-        len("$/1M tokens"), max(len(f"${r.cost_per_million_tokens:,.2f}") for r in rows_sorted)
+        len("$/1M tokens"),
+        max(len(f"${r.cost_per_million_tokens:,.2f}") for r in rows_sorted),
     )
     header = f"{'Option':<{name_w}}  {'Monthly cost':>{cost_w}}  {'$/1M tokens':>{per_m_w}}  Notes"
     lines = [header, "-" * len(header)]
     for r in rows_sorted:
         cost_s = f"${r.monthly_cost:,.2f}"
         per_m_s = f"${r.cost_per_million_tokens:,.2f}"
-        lines.append(f"{r.name:<{name_w}}  {cost_s:>{cost_w}}  {per_m_s:>{per_m_w}}  {r.notes}")
+        lines.append(
+            f"{r.name:<{name_w}}  {cost_s:>{cost_w}}  {per_m_s:>{per_m_w}}  {r.notes}"
+        )
     cheapest = rows_sorted[0]
     most_expensive = rows_sorted[-1]
     if most_expensive.monthly_cost > 0 and cheapest.monthly_cost > 0:
@@ -250,9 +269,18 @@ def render_table(rows: list) -> str:
 def export_csv(rows: list, path: Path) -> None:
     with open(path, "w", newline="", encoding="utf-8") as f:
         writer = csv.writer(f)
-        writer.writerow(["option", "monthly_cost_usd", "cost_per_million_tokens_usd", "notes"])
+        writer.writerow(
+            ["option", "monthly_cost_usd", "cost_per_million_tokens_usd", "notes"]
+        )
         for r in sorted(rows, key=lambda r: r.monthly_cost):
-            writer.writerow([r.name, f"{r.monthly_cost:.4f}", f"{r.cost_per_million_tokens:.4f}", r.notes])
+            writer.writerow(
+                [
+                    r.name,
+                    f"{r.monthly_cost:.4f}",
+                    f"{r.cost_per_million_tokens:.4f}",
+                    r.notes,
+                ]
+            )
 
 
 def export_json(rows: list, path: Path) -> None:
@@ -317,6 +345,23 @@ def detect_nvidia_gpu(runner: Callable = subprocess.run) -> Optional[dict]:
     }
 
 
+def format_gpu_summary(gpu_info: dict) -> str:
+    """Render a detected GPU's info for display.
+
+    ``nvidia-smi`` reports ``[N/A]`` for some fields on certain cards/drivers
+    (``_safe_float`` turns that into ``None``); numeric formatting on a bare
+    ``None`` raises ``TypeError``, so each field is guarded independently
+    rather than formatted unconditionally.
+    """
+    mem = gpu_info.get("memory_total_mib")
+    mem_s = f"{mem:.0f} MiB VRAM" if mem is not None else "VRAM unknown"
+    draw = gpu_info.get("power_draw_w")
+    draw_s = f"{draw:.0f} W draw" if draw is not None else "power draw unknown"
+    limit = gpu_info.get("power_limit_w")
+    limit_s = f"{limit:.0f} W limit" if limit is not None else "power limit unknown"
+    return f"{gpu_info['name']} ({mem_s}, {draw_s} / {limit_s})"
+
+
 # --------------------------------------------------------------------------
 # Optional local throughput benchmark (best-effort, non-fatal)
 # --------------------------------------------------------------------------
@@ -327,13 +372,30 @@ BENCHMARK_PROMPT = (
 )
 
 
+def _validate_http_url(base_url: str) -> None:
+    """Reject non-http(s) base URLs before building a request from them.
+
+    ``base_url`` comes straight from free-form user input; without this, a
+    ``file://`` or other custom scheme would be passed through to
+    ``urllib.request`` unchecked.
+    """
+    scheme = base_url.split("://", 1)[0].lower() if "://" in base_url else ""
+    if scheme not in ("http", "https"):
+        raise ValueError(
+            f"base_url must start with http:// or https:// (got {base_url!r})"
+        )
+
+
 def benchmark_ollama(base_url: str, model: str, num_predict: int = 200) -> float:
     """Measure tokens/sec against a local Ollama server.
 
     Uses Ollama's ``eval_count``/``eval_duration`` fields, which measure
     generation only (excludes prompt processing) — the same basis this
-    script uses elsewhere for local throughput.
+    script uses elsewhere for local throughput. Not directly comparable to
+    ``benchmark_openai_compatible``'s wall-clock measurement (see its
+    docstring).
     """
+    _validate_http_url(base_url)
     payload = json.dumps(
         {
             "model": model,
@@ -362,9 +424,13 @@ def benchmark_openai_compatible(
 ) -> float:
     """Measure tokens/sec against a local OpenAI-compatible chat endpoint.
 
-    Falls back to wall-clock timing with a word-count approximation if the
-    response has no ``usage.completion_tokens`` field.
+    Timing is wall-clock — it includes prompt processing and network
+    round-trip, not generation alone — and falls back to a word-count
+    approximation if the response has no ``usage.completion_tokens`` field.
+    Both make this systematically lower and not directly comparable to
+    ``benchmark_ollama``'s generation-only ``eval_duration`` measurement.
     """
+    _validate_http_url(base_url)
     payload = json.dumps(
         {
             "model": model,
@@ -377,7 +443,10 @@ def benchmark_openai_compatible(
     if api_key:
         headers["Authorization"] = f"Bearer {api_key}"
     req = urllib.request.Request(
-        f"{base_url.rstrip('/')}/v1/chat/completions", data=payload, headers=headers, method="POST"
+        f"{base_url.rstrip('/')}/v1/chat/completions",
+        data=payload,
+        headers=headers,
+        method="POST",
     )
     start = time.monotonic()
     with urllib.request.urlopen(req, timeout=120) as resp:
@@ -397,16 +466,30 @@ def benchmark_openai_compatible(
 # --------------------------------------------------------------------------
 
 
-def prompt_float(prompt: str, default: Optional[float] = None) -> float:
+def prompt_float(
+    prompt: str, default: Optional[float] = None, *, minimum: Optional[float] = None
+) -> float:
+    """Prompt for a float, re-asking on non-numeric input.
+
+    ``minimum`` (exclusive-or-equal, i.e. ``value >= minimum``) rejects
+    values that would blow up downstream math (e.g. a tokens/sec or
+    lifetime-years of 0 raises ``ValueError`` deep in the cost calculation,
+    discarding every answer the user already gave).
+    """
     suffix = f" [{default}]" if default is not None else ""
     while True:
         raw = input(f"{prompt}{suffix}: ").strip()
         if not raw and default is not None:
             return default
         try:
-            return float(raw)
+            value = float(raw)
         except ValueError:
             print("  Please enter a number.")
+            continue
+        if minimum is not None and value < minimum:
+            print(f"  Please enter a number >= {minimum}.")
+            continue
+        return value
 
 
 def prompt_choice(prompt: str, choices: list, default: Optional[str] = None) -> str:
@@ -437,19 +520,19 @@ def interactive_workload() -> Workload:
     return Workload(requests_per_day, avg_input, avg_output)
 
 
-def interactive_local_setup() -> ComparisonRow:
+def interactive_local_setup() -> Callable[[Workload], ComparisonRow]:
     print("\n== Local setup ==")
     gpu_info = None
-    if prompt_yes_no("Attempt to auto-detect an NVIDIA GPU via nvidia-smi?", default=True):
+    if prompt_yes_no(
+        "Attempt to auto-detect an NVIDIA GPU via nvidia-smi?", default=True
+    ):
         gpu_info = detect_nvidia_gpu()
         if gpu_info:
-            print(
-                f"  Detected: {gpu_info['name']} "
-                f"({gpu_info['memory_total_mib']:.0f} MiB VRAM, "
-                f"{gpu_info['power_draw_w']} W draw / {gpu_info['power_limit_w']} W limit)"
-            )
+            print(f"  Detected: {format_gpu_summary(gpu_info)}")
         else:
-            print("  No GPU detected (nvidia-smi not found or returned no data) — enter manually.")
+            print(
+                "  No GPU detected (nvidia-smi not found or returned no data) — enter manually."
+            )
 
     tokens_per_sec = None
     if prompt_yes_no(
@@ -457,7 +540,10 @@ def interactive_local_setup() -> ComparisonRow:
         default=False,
     ):
         backend = prompt_choice("Backend", ["ollama", "openai"], default="ollama")
-        base_url = input("Base URL [http://localhost:11434]: ").strip() or "http://localhost:11434"
+        base_url = (
+            input("Base URL [http://localhost:11434]: ").strip()
+            or "http://localhost:11434"
+        )
         model = input("Model name as served locally: ").strip()
         try:
             if backend == "ollama":
@@ -465,20 +551,34 @@ def interactive_local_setup() -> ComparisonRow:
             else:
                 tokens_per_sec = benchmark_openai_compatible(base_url, model)
             print(f"  Measured throughput: {tokens_per_sec:.1f} tokens/sec")
-        except Exception as exc:  # noqa: BLE001 - best-effort, any failure just falls back
+        except (
+            Exception
+        ) as exc:  # noqa: BLE001 - best-effort, any failure just falls back
             print(f"  Benchmark failed ({exc}) — enter throughput manually.")
             tokens_per_sec = None
 
     if tokens_per_sec is None:
-        tokens_per_sec = prompt_float("Measured or estimated tokens/sec", default=40.0)
+        tokens_per_sec = prompt_float(
+            "Measured or estimated tokens/sec", default=40.0, minimum=0.001
+        )
 
     mode = prompt_choice("Hardware mode", ["own", "rent"], default="own")
     if mode == "own":
-        default_power = gpu_info["power_limit_w"] if gpu_info and gpu_info.get("power_limit_w") else 450.0
-        hardware_cost = prompt_float("Hardware cost (USD)", default=1600.0)
-        lifetime_years = prompt_float("Expected hardware lifetime (years)", default=3.0)
-        power_watts = prompt_float("Power draw under load (W)", default=default_power)
-        electricity_rate = prompt_float("Electricity rate (USD/kWh)", default=0.15)
+        default_power = (
+            gpu_info["power_limit_w"]
+            if gpu_info and gpu_info.get("power_limit_w")
+            else 450.0
+        )
+        hardware_cost = prompt_float("Hardware cost (USD)", default=1600.0, minimum=0)
+        lifetime_years = prompt_float(
+            "Expected hardware lifetime (years)", default=3.0, minimum=0.001
+        )
+        power_watts = prompt_float(
+            "Power draw under load (W)", default=default_power, minimum=0
+        )
+        electricity_rate = prompt_float(
+            "Electricity rate (USD/kWh)", default=0.15, minimum=0
+        )
         return lambda workload: build_local_row(
             workload,
             tokens_per_sec,
@@ -489,7 +589,9 @@ def interactive_local_setup() -> ComparisonRow:
             electricity_rate_per_kwh=electricity_rate,
         )
     else:
-        hourly_rate = prompt_float("Rented GPU hourly rate (USD/hr)", default=2.50)
+        hourly_rate = prompt_float(
+            "Rented GPU hourly rate (USD/hr)", default=2.50, minimum=0
+        )
         return lambda workload: build_local_row(
             workload, tokens_per_sec, "rent", hourly_rate=hourly_rate
         )
@@ -535,7 +637,10 @@ def run_interactive() -> int:
 
     if prompt_yes_no("\nExport results to a file?", default=False):
         fmt = prompt_choice("Format", ["csv", "json"], default="csv")
-        out_path = Path(input(f"Output path [cost_comparison.{fmt}]: ").strip() or f"cost_comparison.{fmt}")
+        out_path = Path(
+            input(f"Output path [cost_comparison.{fmt}]: ").strip()
+            or f"cost_comparison.{fmt}"
+        )
         if fmt == "csv":
             export_csv(rows, out_path)
         else:
@@ -550,7 +655,26 @@ def run_interactive() -> int:
 # --------------------------------------------------------------------------
 
 
-def run_non_interactive(config_path: Path, export_fmt: Optional[str], export_path: Optional[Path]) -> int:
+class ConfigError(ValueError):
+    """Raised for a malformed --non-interactive config, with a clear message.
+
+    Deliberately distinct from a bare ``KeyError``/``TypeError`` traceback:
+    this is user-facing config, so a missing or misspelled field should say
+    exactly what's missing rather than dumping a Python stack trace.
+    """
+
+
+def _require_keys(section: dict, required: list, context: str) -> None:
+    missing = [k for k in required if k not in section]
+    if missing:
+        raise ConfigError(
+            f"{context} config is missing required field(s): {', '.join(missing)}"
+        )
+
+
+def run_non_interactive(
+    config_path: Path, export_fmt: Optional[str], export_path: Optional[Path]
+) -> int:
     """Run the comparison from a JSON config instead of interactive prompts.
 
     Config shape:
@@ -562,17 +686,45 @@ def run_non_interactive(config_path: Path, export_fmt: Optional[str], export_pat
           "pricing_file": "pricing.json",
           "selected_models": ["claude/opus-5", "deepseek/deepseek-v3"]
         }
+
+    ``pricing_file``, if relative, is resolved against ``config_path``'s
+    directory (not the process's working directory) so the example config
+    works regardless of where the script is invoked from.
     """
     with open(config_path, "r", encoding="utf-8") as f:
         config = json.load(f)
 
-    workload = Workload(**config["workload"])
-    pricing = load_pricing(Path(config.get("pricing_file", DEFAULT_PRICING_PATH)))
+    _require_keys(config, ["workload", "local"], "top-level")
+    _require_keys(
+        config["workload"],
+        ["requests_per_day", "avg_input_tokens", "avg_output_tokens"],
+        "workload",
+    )
+    try:
+        workload = Workload(**config["workload"])
+    except TypeError as exc:
+        raise ConfigError(f"workload config has an unexpected field: {exc}") from exc
+
+    pricing_path = Path(config.get("pricing_file", DEFAULT_PRICING_PATH))
+    if not pricing_path.is_absolute():
+        pricing_path = config_path.parent / pricing_path
+    pricing = load_pricing(pricing_path)
     selected = set(config["selected_models"]) if config.get("selected_models") else None
 
     local_cfg = config["local"]
+    _require_keys(local_cfg, ["mode", "tokens_per_sec"], "local")
     mode = local_cfg["mode"]
     if mode == "own":
+        _require_keys(
+            local_cfg,
+            [
+                "hardware_cost",
+                "lifetime_years",
+                "power_watts",
+                "electricity_rate_per_kwh",
+            ],
+            "local (mode=own)",
+        )
         local_row = build_local_row(
             workload,
             local_cfg["tokens_per_sec"],
@@ -582,10 +734,16 @@ def run_non_interactive(config_path: Path, export_fmt: Optional[str], export_pat
             power_watts=local_cfg["power_watts"],
             electricity_rate_per_kwh=local_cfg["electricity_rate_per_kwh"],
         )
-    else:
+    elif mode == "rent":
+        _require_keys(local_cfg, ["hourly_rate"], "local (mode=rent)")
         local_row = build_local_row(
-            workload, local_cfg["tokens_per_sec"], "rent", hourly_rate=local_cfg["hourly_rate"]
+            workload,
+            local_cfg["tokens_per_sec"],
+            "rent",
+            hourly_rate=local_cfg["hourly_rate"],
         )
+    else:
+        raise ConfigError(f"local.mode must be 'own' or 'rent', got {mode!r}")
 
     rows = [local_row] + build_hosted_rows(workload, pricing, selected)
     print(render_table(rows))
@@ -611,14 +769,32 @@ def main(argv: Optional[list] = None) -> int:
         type=Path,
         help="JSON config file for --non-interactive mode (see run_non_interactive docstring).",
     )
-    parser.add_argument("--export", choices=["csv", "json"], help="Export results in this format.")
+    parser.add_argument(
+        "--export", choices=["csv", "json"], help="Export results in this format."
+    )
     parser.add_argument("--export-path", type=Path, help="Path to write the export to.")
     args = parser.parse_args(argv)
 
     if args.non_interactive:
         if not args.config:
             parser.error("--non-interactive requires --config")
-        return run_non_interactive(args.config, args.export, args.export_path)
+        # --export without --export-path would otherwise silently export
+        # nothing (run_non_interactive requires both to be truthy) — default
+        # a path rather than let the flag be a no-op.
+        if args.export and not args.export_path:
+            args.export_path = Path(f"cost_comparison.{args.export}")
+        try:
+            return run_non_interactive(args.config, args.export, args.export_path)
+        except ConfigError as exc:
+            print(f"Config error: {exc}", file=sys.stderr)
+            return 1
+
+    if args.export or args.export_path:
+        print(
+            "Note: --export/--export-path only apply to --non-interactive mode; "
+            "interactive mode asks about exporting at the end.",
+            file=sys.stderr,
+        )
 
     try:
         return run_interactive()

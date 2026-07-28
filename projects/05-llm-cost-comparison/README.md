@@ -69,12 +69,32 @@ See `example_config.json` for the config shape.
 
 ## Updating pricing
 
-Hosted pricing changes over time. Edit `pricing.json` directly — it's a
-flat `provider -> model -> {input_per_million, output_per_million}`
-structure with an `as_of` date and a `note` field. **DeepSeek's rates in
-particular are approximate public figures and haven't been verified against
-a live pricing page** — check the provider's pricing page before relying on
-these numbers for a real decision.
+Hosted pricing changes over time. Edit `pricing.json` directly. Its shape is:
+
+```json
+{
+  "as_of": "2026-07-28",
+  "note": "free-text caveat shown to the user",
+  "providers": {
+    "<provider_key>": {
+      "display_name": "...",
+      "models": {
+        "<model_key>": {
+          "display_name": "...",
+          "input_per_million": 0.0,
+          "output_per_million": 0.0
+        }
+      }
+    }
+  }
+}
+```
+
+`selected_models` (in a non-interactive config, or the interactive provider
+picker) refers to models by `<provider_key>/<model_key>`. **DeepSeek's rates
+in particular are approximate public figures and haven't been verified
+against a live pricing page** — check the provider's pricing page before
+relying on these numbers for a real decision.
 
 ## Tests
 
