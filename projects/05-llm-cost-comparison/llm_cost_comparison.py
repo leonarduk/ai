@@ -292,6 +292,11 @@ class ComparisonRow:
     monthly_cost: float
     cost_per_million_tokens: float
     notes: str = ""
+    # False for a local option whose measured/assumed throughput can't
+    # actually deliver the workload in real time (see build_local_row) — its
+    # monthly_cost is real arithmetic but not a real-world option, so it must
+    # never rank as "cheapest" against options that can actually do the job.
+    feasible: bool = True
 
 
 def build_local_row(
@@ -330,7 +335,8 @@ def build_local_row(
         raise ValueError(f"Unknown local cost mode: {mode!r}")
     per_million = cost_per_million_tokens(monthly_cost, workload.monthly_total_tokens)
     notes = f"~{hours_needed:.1f} compute-hrs/month at {tokens_per_sec:.1f} tok/s"
-    if hours_needed > HOURS_PER_MONTH:
+    feasible = hours_needed <= HOURS_PER_MONTH
+    if not feasible:
         parallel_needed = hours_needed / HOURS_PER_MONTH
         notes += (
             f" — ⚠️ exceeds the {HOURS_PER_MONTH:.0f} hours in a month: this "
@@ -339,7 +345,7 @@ def build_local_row(
             "in parallel); the cost above is what that much compute would cost, not "
             "what one machine running 24/7 costs"
         )
-    return ComparisonRow(name, monthly_cost, per_million, notes)
+    return ComparisonRow(name, monthly_cost, per_million, notes, feasible=feasible)
 
 
 def build_hosted_rows(
@@ -371,29 +377,68 @@ def build_hosted_rows(
     return rows
 
 
-def render_table(rows: list) -> str:
-    """Render comparison rows as a plain-text table, cheapest first."""
+CURRENCY_SYMBOLS = {"USD": "$", "GBP": "£"}
+
+
+def convert_rows_currency(rows: list, usd_per_gbp: float) -> list:
+    """Convert every row's dollar figures to GBP for display.
+
+    All cost math internally is in USD (hosted pricing is USD-denominated),
+    so a GBP-preferring user's table is produced by converting the final
+    figures once at display time rather than threading a currency through
+    every cost function.
+    """
+    return [
+        ComparisonRow(
+            r.name,
+            r.monthly_cost / usd_per_gbp,
+            r.cost_per_million_tokens / usd_per_gbp,
+            r.notes,
+            feasible=r.feasible,
+        )
+        for r in rows
+    ]
+
+
+def render_table(rows: list, currency: str = "USD") -> str:
+    """Render comparison rows as a plain-text table, cheapest first.
+
+    Infeasible rows (``feasible=False`` — a local option whose throughput
+    can't keep up with the workload in real time) are sorted to the bottom
+    regardless of their dollar figure, and never count as "cheapest": that
+    honor would be nonsense for a number nobody can actually pay in practice.
+    """
     if not rows:
         return "(no rows to display)"
-    rows_sorted = sorted(rows, key=lambda r: r.monthly_cost)
+    symbol = CURRENCY_SYMBOLS.get(currency, currency + " ")
+    rows_sorted = sorted(rows, key=lambda r: (not r.feasible, r.monthly_cost))
     name_w = max(len("Option"), max(len(r.name) for r in rows_sorted))
     cost_w = max(
-        len("Monthly cost"), max(len(f"${r.monthly_cost:,.2f}") for r in rows_sorted)
+        len("Monthly cost"),
+        max(len(f"{symbol}{r.monthly_cost:,.2f}") for r in rows_sorted),
     )
     per_m_w = max(
-        len("$/1M tokens"),
-        max(len(f"${r.cost_per_million_tokens:,.2f}") for r in rows_sorted),
+        len(f"{symbol}/1M tokens"),
+        max(len(f"{symbol}{r.cost_per_million_tokens:,.2f}") for r in rows_sorted),
     )
-    header = f"{'Option':<{name_w}}  {'Monthly cost':>{cost_w}}  {'$/1M tokens':>{per_m_w}}  Notes"
+    header = (
+        f"{'Option':<{name_w}}  {'Monthly cost':>{cost_w}}  "
+        f"{symbol + '/1M tokens':>{per_m_w}}  Notes"
+    )
     lines = [header, "-" * len(header)]
     for r in rows_sorted:
-        cost_s = f"${r.monthly_cost:,.2f}"
-        per_m_s = f"${r.cost_per_million_tokens:,.2f}"
+        cost_s = f"{symbol}{r.monthly_cost:,.2f}"
+        per_m_s = f"{symbol}{r.cost_per_million_tokens:,.2f}"
         lines.append(
             f"{r.name:<{name_w}}  {cost_s:>{cost_w}}  {per_m_s:>{per_m_w}}  {r.notes}"
         )
-    cheapest = rows_sorted[0]
-    most_expensive = rows_sorted[-1]
+    feasible_rows = [r for r in rows_sorted if r.feasible]
+    cheapest = (
+        min(feasible_rows, key=lambda r: r.monthly_cost)
+        if feasible_rows
+        else rows_sorted[0]
+    )
+    most_expensive = max(rows_sorted, key=lambda r: r.monthly_cost)
     if (
         len(rows_sorted) > 1
         and most_expensive.monthly_cost > 0
@@ -407,13 +452,19 @@ def render_table(rows: list) -> str:
     return "\n".join(lines)
 
 
-def export_csv(rows: list, path: Path) -> None:
+def export_csv(rows: list, path: Path, currency: str = "USD") -> None:
+    suffix = currency.lower()
     with open(path, "w", newline="", encoding="utf-8") as f:
         writer = csv.writer(f)
         writer.writerow(
-            ["option", "monthly_cost_usd", "cost_per_million_tokens_usd", "notes"]
+            [
+                "option",
+                f"monthly_cost_{suffix}",
+                f"cost_per_million_tokens_{suffix}",
+                "notes",
+            ]
         )
-        for r in sorted(rows, key=lambda r: r.monthly_cost):
+        for r in sorted(rows, key=lambda r: (not r.feasible, r.monthly_cost)):
             writer.writerow(
                 [
                     r.name,
@@ -424,15 +475,16 @@ def export_csv(rows: list, path: Path) -> None:
             )
 
 
-def export_json(rows: list, path: Path) -> None:
+def export_json(rows: list, path: Path, currency: str = "USD") -> None:
+    suffix = currency.lower()
     data = [
         {
             "option": r.name,
-            "monthly_cost_usd": round(r.monthly_cost, 4),
-            "cost_per_million_tokens_usd": round(r.cost_per_million_tokens, 4),
+            f"monthly_cost_{suffix}": round(r.monthly_cost, 4),
+            f"cost_per_million_tokens_{suffix}": round(r.cost_per_million_tokens, 4),
             "notes": r.notes,
         }
-        for r in sorted(rows, key=lambda r: r.monthly_cost)
+        for r in sorted(rows, key=lambda r: (not r.feasible, r.monthly_cost))
     ]
     with open(path, "w", encoding="utf-8") as f:
         json.dump(data, f, indent=2)
@@ -930,7 +982,13 @@ def interactive_workload() -> list:
     return [("custom", "Custom", _prompt_custom_workload())]
 
 
-def interactive_local_setup() -> Callable[[Workload], list]:
+def interactive_local_setup() -> tuple:
+    """Returns ``(row_builder, display_currency, usd_per_gbp)``.
+
+    ``display_currency`` is ``"GBP"`` only when the user chose to pay
+    electricity in GBP in ``"existing"`` mode; ``usd_per_gbp`` is the rate to
+    convert the whole comparison table to GBP for display (None otherwise).
+    """
     print("\n== Local setup ==")
     gpu_info = None
     if prompt_yes_no(
@@ -1028,17 +1086,21 @@ def interactive_local_setup() -> Callable[[Workload], list]:
         electricity_rate = prompt_float(
             "Electricity rate (USD/kWh)", default=0.15, minimum=0
         )
-        return lambda workload: [
-            build_local_row(
-                workload,
-                tokens_per_sec,
-                "own",
-                hardware_cost=hardware_cost,
-                lifetime_years=lifetime_years,
-                power_watts=power_watts,
-                electricity_rate_per_kwh=electricity_rate,
-            )
-        ]
+        return (
+            lambda workload: [
+                build_local_row(
+                    workload,
+                    tokens_per_sec,
+                    "own",
+                    hardware_cost=hardware_cost,
+                    lifetime_years=lifetime_years,
+                    power_watts=power_watts,
+                    electricity_rate_per_kwh=electricity_rate,
+                )
+            ],
+            "USD",
+            None,
+        )
     elif mode == "existing":
         idle_draw = gpu_info.get("power_draw_w") if gpu_info else None
         extra_default = None
@@ -1088,7 +1150,10 @@ def interactive_local_setup() -> Callable[[Workload], list]:
         )
 
         electricity_rate = None
+        display_currency = "USD"
+        usd_per_gbp = None
         if prompt_yes_no("Do you pay for electricity in GBP (e.g. UK)?", default=True):
+            display_currency = "GBP"
             gbp_rate = None
             if prompt_yes_no(
                 "Look up your current unit rate live from Octopus Agile?", default=True
@@ -1116,8 +1181,8 @@ def interactive_local_setup() -> Callable[[Workload], list]:
             else:
                 print("  Could not fetch a live exchange rate — enter manually.")
             usd_per_gbp = prompt_float(
-                "GBP→USD exchange rate (so this can be compared against USD hosted "
-                "pricing)",
+                "GBP→USD exchange rate (used internally to keep local and hosted "
+                "costs comparable; the table itself is shown in GBP)",
                 default=live_usd_per_gbp if live_usd_per_gbp is not None else 1.27,
                 minimum=0,
             )
@@ -1147,14 +1212,20 @@ def interactive_local_setup() -> Callable[[Workload], list]:
                 ),
             ]
 
-        return build_existing_rows
+        return build_existing_rows, display_currency, usd_per_gbp
     else:
         hourly_rate = prompt_float(
             "Rented GPU hourly rate (USD/hr)", default=2.50, minimum=0
         )
-        return lambda workload: [
-            build_local_row(workload, tokens_per_sec, "rent", hourly_rate=hourly_rate)
-        ]
+        return (
+            lambda workload: [
+                build_local_row(
+                    workload, tokens_per_sec, "rent", hourly_rate=hourly_rate
+                )
+            ],
+            "USD",
+            None,
+        )
 
 
 def interactive_provider_selection(pricing: dict) -> Optional[set]:
@@ -1181,13 +1252,15 @@ def run_interactive() -> int:
     print(f"Hosted pricing as of {as_of}. {note}\n")
 
     scenarios = interactive_workload()
-    local_row_builder = interactive_local_setup()
+    local_row_builder, display_currency, usd_per_gbp = interactive_local_setup()
     selected = interactive_provider_selection(pricing)
 
     scenario_rows = {}
     for key, label, workload in scenarios:
         rows = list(local_row_builder(workload))
         rows.extend(build_hosted_rows(workload, pricing, selected))
+        if display_currency == "GBP":
+            rows = convert_rows_currency(rows, usd_per_gbp)
         scenario_rows[key] = (label, workload, rows)
 
         print(f"\n== Results: {label} ==")
@@ -1196,7 +1269,7 @@ def run_interactive() -> int:
             f"{workload.monthly_total_tokens:,.0f} total tokens/month"
         )
         print()
-        print(render_table(rows))
+        print(render_table(rows, currency=display_currency))
 
     if prompt_yes_no("\nExport results to a file?", default=False):
         fmt = prompt_choice("Format", ["csv", "json"], default="csv")
@@ -1210,9 +1283,9 @@ def run_interactive() -> int:
                 or default_name
             )
             if fmt == "csv":
-                export_csv(rows, out_path)
+                export_csv(rows, out_path, currency=display_currency)
             else:
-                export_json(rows, out_path)
+                export_json(rows, out_path, currency=display_currency)
             print(f"Wrote {out_path}")
 
     return 0

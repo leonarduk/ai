@@ -103,11 +103,19 @@ requests/day and token counts behind each one.
     to this use (measured extra draw plus a fixed allowance for the rest of
     the PC).
   - Electricity rate can be entered in USD/kWh, or in GBP/kWh — including a
-    live lookup of the current UK Octopus Agile unit rate — converted to
-    USD via an exchange rate you supply, so it's comparable against the
-    USD-denominated hosted pricing.
+    live lookup of the current UK Octopus Agile unit rate. All cost math is
+    still done internally in USD (hosted pricing is USD-denominated), using
+    a live exchange rate (Frankfurter, exchangerate.host, or Yahoo Finance as
+    fallbacks, in that order), but **the whole table — local and hosted rows
+    alike — is displayed and exported in GBP** whenever you choose GBP, not
+    just the local electricity figure.
   - The non-interactive config still takes a single `power_watts` — pick
     whichever basis applies to your situation.
+- **Feasibility check**: if the workload needs more compute-hours per month
+  than actually exist in a month (a slow local setup can't keep up with a
+  high-volume workload in real time), the row's notes say so explicitly and
+  it's never ranked as "cheapest" — a number nobody can actually pay in
+  practice shouldn't win the comparison just because the arithmetic is small.
 - **Local — buying new hardware** (`own` mode): split into a *fixed* monthly
   cost (hardware price amortized over its expected lifetime — it ages
   whether it's busy or not) plus the same *variable* electricity cost as

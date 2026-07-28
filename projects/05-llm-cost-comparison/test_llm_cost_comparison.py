@@ -149,6 +149,7 @@ def test_build_local_row_flags_when_throughput_cannot_keep_up_in_real_time():
     )
     assert "can't keep up" in row.notes
     assert "exceeds" in row.notes
+    assert row.feasible is False
 
 
 def test_build_local_row_no_warning_when_throughput_is_sufficient():
@@ -276,6 +277,52 @@ def test_render_table_empty():
     assert "no rows" in m.render_table([])
 
 
+def test_render_table_never_picks_infeasible_row_as_cheapest():
+    rows = [
+        m.ComparisonRow(
+            "Cheap but infeasible",
+            monthly_cost=5.0,
+            cost_per_million_tokens=0.01,
+            feasible=False,
+        ),
+        m.ComparisonRow(
+            "Real option", monthly_cost=100.0, cost_per_million_tokens=10.0
+        ),
+    ]
+    table = m.render_table(rows)
+    assert "Cheapest: Real option" in table
+    # Infeasible row still shown, but after the real option, not ranked first.
+    assert table.index("Real option") < table.index("Cheap but infeasible")
+
+
+def test_render_table_falls_back_to_cheapest_overall_if_all_infeasible():
+    rows = [
+        m.ComparisonRow(
+            "A", monthly_cost=10.0, cost_per_million_tokens=1.0, feasible=False
+        ),
+        m.ComparisonRow(
+            "B", monthly_cost=5.0, cost_per_million_tokens=0.5, feasible=False
+        ),
+    ]
+    table = m.render_table(rows)
+    assert "Cheapest: B" in table
+
+
+def test_render_table_gbp_currency_uses_pound_symbol():
+    rows = [m.ComparisonRow("A", monthly_cost=10.0, cost_per_million_tokens=1.0)]
+    table = m.render_table(rows, currency="GBP")
+    assert "£10.00" in table
+    assert "$" not in table
+
+
+def test_convert_rows_currency_divides_by_rate():
+    rows = [m.ComparisonRow("A", monthly_cost=127.0, cost_per_million_tokens=12.7)]
+    converted = m.convert_rows_currency(rows, usd_per_gbp=1.27)
+    assert converted[0].monthly_cost == pytest.approx(100.0)
+    assert converted[0].cost_per_million_tokens == pytest.approx(10.0)
+    assert converted[0].name == "A"
+
+
 def test_export_csv_and_json(tmp_path: Path):
     rows = [
         m.ComparisonRow("A", 10.0, 1.0, "note-a"),
@@ -296,6 +343,20 @@ def test_export_csv_and_json(tmp_path: Path):
     assert data[0]["option"] == "B"
     assert data[1]["option"] == "A"
     assert data[0]["monthly_cost_usd"] == 5.0
+
+
+def test_export_csv_and_json_use_currency_suffix(tmp_path: Path):
+    rows = [m.ComparisonRow("A", 10.0, 1.0, "note-a")]
+
+    csv_path = tmp_path / "out.csv"
+    m.export_csv(rows, csv_path, currency="GBP")
+    csv_content = csv_path.read_text(encoding="utf-8")
+    assert "monthly_cost_gbp" in csv_content
+
+    json_path = tmp_path / "out.json"
+    m.export_json(rows, json_path, currency="GBP")
+    data = json.loads(json_path.read_text(encoding="utf-8"))
+    assert data[0]["monthly_cost_gbp"] == 10.0
 
 
 # --------------------------------------------------------------------------
