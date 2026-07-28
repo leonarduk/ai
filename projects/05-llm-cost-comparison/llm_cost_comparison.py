@@ -564,10 +564,10 @@ def fetch_octopus_agile_rate(
         return None
 
 
-# Tried in order; each is a free, no-auth-required FX API. Frankfurter has
-# moved domains before (frankfurter.app -> frankfurter.dev), and any single
-# provider can be down or blocked on a given network, so falling through to
-# the next one is more robust than depending on exactly one host.
+# Tried in order; each is a free FX source. Frankfurter has moved domains
+# before (frankfurter.app -> frankfurter.dev), and any single provider can be
+# down or blocked on a given network, so falling through to the next one is
+# more robust than depending on exactly one host.
 FX_RATE_URL_TEMPLATES: tuple = (
     "https://api.frankfurter.dev/v1/latest?from={from_currency}&to={to_currency}",
     "https://api.frankfurter.app/v1/latest?from={from_currency}&to={to_currency}",
@@ -575,10 +575,29 @@ FX_RATE_URL_TEMPLATES: tuple = (
 )
 
 
+def _fetch_yahoo_fx_rate(from_currency: str, to_currency: str, timeout: float) -> float:
+    """Last-resort fallback via Yahoo Finance's unofficial chart endpoint.
+
+    There's no official public Yahoo Finance API (it was retired in 2017),
+    so this undocumented endpoint can change or start blocking requests
+    without notice — that's why it's tried last, after the FX-specific
+    providers above, rather than first.
+    """
+    url = (
+        f"https://query1.finance.yahoo.com/v8/finance/chart/"
+        f"{from_currency}{to_currency}=X"
+    )
+    req = urllib.request.Request(url, headers={"User-Agent": "Mozilla/5.0"})
+    with urllib.request.urlopen(req, timeout=timeout) as resp:
+        data = json.loads(resp.read())
+    return data["chart"]["result"][0]["meta"]["regularMarketPrice"]
+
+
 def fetch_fx_rate(
     from_currency: str, to_currency: str, timeout: float = 5.0
 ) -> Optional[float]:
-    """Best-effort live exchange rate, trying each of ``FX_RATE_URL_TEMPLATES``.
+    """Best-effort live exchange rate, trying each ``FX_RATE_URL_TEMPLATES``
+    provider and finally Yahoo Finance.
 
     Returns None only if every provider fails (network, unknown currency,
     parsing) so callers fall back to manual entry rather than hardcoding a
@@ -592,7 +611,10 @@ def fetch_fx_rate(
             return data["rates"][to_currency]
         except Exception:  # noqa: BLE001 - best-effort, try the next provider
             continue
-    return None
+    try:
+        return _fetch_yahoo_fx_rate(from_currency, to_currency, timeout)
+    except Exception:  # noqa: BLE001 - best-effort, every provider failed
+        return None
 
 
 # Rough street price (USD) and typical power draw under load (W) for common

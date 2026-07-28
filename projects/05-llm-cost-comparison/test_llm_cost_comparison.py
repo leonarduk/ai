@@ -657,6 +657,32 @@ def test_fetch_fx_rate_falls_back_to_next_provider(monkeypatch):
     assert len(calls) == 3
 
 
+def test_fetch_fx_rate_falls_back_to_yahoo_when_all_fx_providers_fail(monkeypatch):
+    body = json.dumps(
+        {"chart": {"result": [{"meta": {"regularMarketPrice": 1.31}}]}}
+    ).encode("utf-8")
+    calls = []
+
+    def fake_urlopen(req, timeout=None):
+        url = req if isinstance(req, str) else req.full_url
+        calls.append(url)
+        if "yahoo" in url:
+            return _FakeHTTPResponse(body)
+        raise OSError("blocked")
+
+    monkeypatch.setattr(m.urllib.request, "urlopen", fake_urlopen)
+    assert m.fetch_fx_rate("GBP", "USD") == pytest.approx(1.31)
+    assert len(calls) == 4
+
+
+def test_fetch_fx_rate_returns_none_when_yahoo_also_fails(monkeypatch):
+    def fake_urlopen(req, timeout=None):
+        raise OSError("blocked")
+
+    monkeypatch.setattr(m.urllib.request, "urlopen", fake_urlopen)
+    assert m.fetch_fx_rate("GBP", "USD") is None
+
+
 # --------------------------------------------------------------------------
 # prompt_float minimum enforcement
 # --------------------------------------------------------------------------
