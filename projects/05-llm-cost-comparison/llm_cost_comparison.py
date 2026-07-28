@@ -40,6 +40,7 @@ from pathlib import Path
 from typing import Callable, Optional
 
 DEFAULT_PRICING_PATH = Path(__file__).parent / "pricing.json"
+DEFAULT_LAST_RUN_PATH = Path(__file__).parent / ".last_run.json"
 DAYS_PER_MONTH = 30
 HOURS_PER_MONTH = DAYS_PER_MONTH * 24
 
@@ -58,12 +59,23 @@ class ConfigError(ValueError):
 # --------------------------------------------------------------------------
 
 
-def load_pricing(path: Path = DEFAULT_PRICING_PATH) -> dict:
+def load_pricing(
+    path: Path = DEFAULT_PRICING_PATH, *, try_refresh: bool = True
+) -> dict:
     """Load hosted-provider pricing from a JSON config file.
 
-    Kept in its own function (rather than inlined literals) so pricing can
-    be updated by editing ``pricing.json`` without touching this script.
+    When ``try_refresh`` is True (the default), attempts a best-effort live
+    fetch of the latest DeepSeek prices from the official API docs first.
+    If the fetch succeeds the cached file is updated in-place; if it fails
+    the previously cached file is used as-is with no error.
+
+    The refresh is skipped when ``path`` differs from ``DEFAULT_PRICING_PATH``
+    (e.g. in tests with temp files) so callers can supply their own pricing
+    without side effects.
     """
+    if try_refresh and path == DEFAULT_PRICING_PATH:
+        fetch_deepseek_pricing(path)
+        fetch_bedrock_pricing(path)
     with open(path, "r", encoding="utf-8") as f:
         try:
             return json.load(f)
@@ -76,6 +88,185 @@ def iter_models(pricing: dict):
     for provider_key, provider in pricing.get("providers", {}).items():
         for model_key, model_info in provider.get("models", {}).items():
             yield provider_key, model_key, model_info
+
+
+DEEPSEEK_PRICING_URL = "https://api-docs.deepseek.com/quick_start/pricing/"
+
+
+def fetch_deepseek_pricing(
+    path: Path = DEFAULT_PRICING_PATH, timeout: float = 10.0
+) -> bool:
+    """Fetch DeepSeek pricing from the official API docs and update ``path``.
+
+    Returns ``True`` if the file was updated, ``False`` if the fetch failed
+    or the prices were unchanged.  Only the DeepSeek section is touched;
+    other providers (Claude, etc.) are preserved as-is.
+    """
+    import re
+
+    try:
+        req = urllib.request.Request(
+            DEEPSEEK_PRICING_URL,
+            headers={"User-Agent": "Mozilla/5.0"},
+            method="GET",
+        )
+        with urllib.request.urlopen(req, timeout=timeout) as resp:
+            text = resp.read().decode("utf-8")
+    except Exception:
+        return False
+
+    # Extract the pricing rows from the HTML.  The page renders a table with
+    # Flash and Pro prices side-by-side in the same row, so the Pro patterns
+    # skip the first dollar amount (Flash) and capture the second (Pro).
+    flash_cache_hit = _extract_price(text, r"deepseek-v4-flash.*?cache hit.*?\$([\d.]+)")
+    flash_cache_miss = _extract_price(text, r"deepseek-v4-flash.*?cache miss.*?\$([\d.]+)")
+    flash_output = _extract_price(text, r"deepseek-v4-flash.*?output tokens.*?\$([\d.]+)")
+    pro_cache_hit = _extract_price(text, r"deepseek-v4-pro.*?cache hit.*?\$[\d.]+\s*\$([\d.]+)")
+    pro_cache_miss = _extract_price(text, r"deepseek-v4-pro.*?cache miss.*?\$[\d.]+\s*\$([\d.]+)")
+    pro_output = _extract_price(text, r"deepseek-v4-pro.*?output tokens.*?\$[\d.]+\s*\$([\d.]+)")
+
+    if None in (flash_cache_miss, flash_output, pro_cache_miss, pro_output):
+        return False
+
+    # Read existing file directly (not via load_pricing, to avoid recursion).
+    try:
+        with open(path, "r", encoding="utf-8") as f:
+            pricing = json.load(f)
+    except (FileNotFoundError, json.JSONDecodeError):
+        pricing = {}
+    deepseek_models = {
+        "deepseek-v4-flash-cache-miss": {
+            "display_name": "DeepSeek Flash",
+            "input_per_million": flash_cache_miss,
+            "output_per_million": flash_output,
+        },
+        "deepseek-v4-pro-cache-miss": {
+            "display_name": "DeepSeek Pro",
+            "input_per_million": pro_cache_miss,
+            "output_per_million": pro_output,
+        },
+    }
+    if flash_cache_hit is not None:
+        deepseek_models["deepseek-v4-flash-cache-hit"] = {
+            "display_name": "DeepSeek Flash (cached)",
+            "input_per_million": flash_cache_hit,
+            "output_per_million": flash_output,
+        }
+    if pro_cache_hit is not None:
+        deepseek_models["deepseek-v4-pro-cache-hit"] = {
+            "display_name": "DeepSeek Pro (cached)",
+            "input_per_million": pro_cache_hit,
+            "output_per_million": pro_output,
+        }
+
+    pricing.setdefault("providers", {})["deepseek"] = {
+        "display_name": "DeepSeek",
+        "models": deepseek_models,
+    }
+    pricing["as_of"] = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+    pricing["source_deepseek"] = DEEPSEEK_PRICING_URL
+
+    with open(path, "w", encoding="utf-8") as f:
+        json.dump(pricing, f, indent=2)
+    return True
+
+
+def _extract_price(text: str, pattern: str) -> Optional[float]:
+    """Try a regex; return the first captured float or None."""
+    import re
+
+    match = re.search(pattern, text, re.IGNORECASE | re.DOTALL)
+    if match:
+        try:
+            return float(match.group(1))
+        except ValueError:
+            return None
+    return None
+
+
+BEDROCK_PRICING_URL = (
+    "https://pricing.us-east-1.amazonaws.com/offers/v1.0/aws/"
+    "AmazonBedrock/current/region_index.json"
+)
+
+
+def fetch_bedrock_pricing(
+    path: Path = DEFAULT_PRICING_PATH, timeout: float = 10.0
+) -> bool:
+    """Fetch Bedrock on-demand per-token prices from the AWS Price List API.
+
+    Returns ``True`` if ``path`` was updated, ``False`` on failure.
+    Existing Bedrock entries are replaced; other providers are untouched.
+    """
+    try:
+        # 1. Get the current version URL for us-east-1
+        with urllib.request.urlopen(BEDROCK_PRICING_URL, timeout=timeout) as resp:
+            region_index = json.loads(resp.read())
+        version_url = region_index["regions"]["us-east-1"]["currentVersionUrl"]
+        full_url = f"https://pricing.us-east-1.amazonaws.com{version_url}"
+
+        # 2. Fetch the per-SKU pricing data
+        with urllib.request.urlopen(full_url, timeout=timeout) as resp:
+            data = json.loads(resp.read())
+    except Exception:
+        return False
+
+    models = {}
+    for sku, product in data.get("products", {}).items():
+        attrs = product.get("attributes", {})
+        model = attrs.get("model", "").strip()
+        if not model:
+            continue
+        # Only standard on-demand pricing (skip flex / batch / priority tiers).
+        tier = (attrs.get("service_tier") or "").lower()
+        if tier and tier not in ("standard", "on-demand"):
+            continue
+        inference = attrs.get("inferenceType", "").lower()
+        terms = data.get("terms", {}).get("OnDemand", {}).get(sku, {})
+        for term in terms.values():
+            for rate in term.get("priceDimensions", {}).values():
+                try:
+                    price = float(rate.get("pricePerUnit", {}).get("USD", 0))
+                except (ValueError, TypeError):
+                    continue
+                if price <= 0:
+                    continue
+                # Bedrock pricePerUnit is per 1 000 tokens
+                per_million = price * 1000
+                models.setdefault(model, {})
+                if "input" in inference:
+                    models[model]["input_per_million"] = round(per_million, 6)
+                elif "output" in inference:
+                    models[model]["output_per_million"] = round(per_million, 6)
+
+    if not models:
+        return False
+
+    pricing = {}
+    try:
+        with open(path, "r", encoding="utf-8") as f:
+            pricing = json.load(f)
+    except (FileNotFoundError, json.JSONDecodeError):
+        pass
+
+    # Merge into existing aws models — only overwrite entries the API found.
+    existing = pricing.setdefault("providers", {}).setdefault("aws", {}).setdefault("models", {})
+    for model_name, prices in models.items():
+        key = model_name.lower().replace(" ", "-").replace(".", "")
+        if "input_per_million" not in prices or "output_per_million" not in prices:
+            continue
+        existing[key] = {
+            "display_name": f"Bedrock {model_name}",
+            "input_per_million": prices["input_per_million"],
+            "output_per_million": prices["output_per_million"],
+        }
+
+    pricing["as_of"] = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+    pricing["source_bedrock"] = BEDROCK_PRICING_URL
+
+    with open(path, "w", encoding="utf-8") as f:
+        json.dump(pricing, f, indent=2)
+    return True
 
 
 # --------------------------------------------------------------------------
@@ -340,6 +531,32 @@ def local_monthly_cost_existing_hardware(
     return power_kw * electricity_rate_per_kwh * hours_needed_per_month
 
 
+def local_monthly_cost_always_on(
+    idle_watts: float,
+    extra_watts: float,
+    electricity_rate_per_kwh: float,
+    hours_needed_per_month: float,
+) -> float:
+    """Monthly electricity cost when the PC runs as a 24/7 server.
+
+    Unlike ``local_monthly_cost_existing_hardware`` (which assumes the
+    machine powers down between sessions), this charges for *all* 720 hours:
+      * idle draw for every hour the machine is on but not generating, plus
+      * the extra GPU/CPU load for the hours spent actively generating.
+
+    ``idle_watts`` is the system's baseline draw (GPU + CPU + RAM + fans,
+    just sitting there).  ``extra_watts`` is the additional draw pulled
+    *above idle* while generating tokens.  Both are needed because hosted
+    serverless (e.g. AWS Lambda, DeepSeek) charges zero when idle — the
+    always-on PC does not.
+    """
+    idle_kw = idle_watts / 1000
+    extra_kw = extra_watts / 1000
+    idle_cost = idle_kw * electricity_rate_per_kwh * HOURS_PER_MONTH
+    generation_cost = extra_kw * electricity_rate_per_kwh * hours_needed_per_month
+    return idle_cost + generation_cost
+
+
 def cost_per_million_tokens(monthly_cost: float, monthly_total_tokens: float) -> float:
     """Blended $/1M tokens (input+output combined) for a given monthly cost.
 
@@ -379,6 +596,8 @@ def build_local_row(
     power_watts: float = 0.0,
     electricity_rate_per_kwh: float = 0.0,
     hourly_rate: float = 0.0,
+    idle_watts: float = 0.0,
+    extra_watts: float = 0.0,
     name: Optional[str] = None,
 ) -> ComparisonRow:
     """Build a local-option row, costed for what the hardware can actually do.
@@ -414,15 +633,20 @@ def build_local_row(
             electricity_rate_per_kwh,
             effective_hours,
         )
-        name = name or "Local (buying new hardware)"
+        name = name or "Local (buy hardware)"
     elif mode == "existing":
         monthly_cost = local_monthly_cost_existing_hardware(
             power_watts, electricity_rate_per_kwh, effective_hours
         )
-        name = name or "Local (electricity only — hardware already owned)"
+        name = name or "Local (already-on PC)"
     elif mode == "rent":
         monthly_cost = local_monthly_cost_rented(hourly_rate, effective_hours)
         name = "Local (rented cloud GPU)"
+    elif mode == "always_on":
+        monthly_cost = local_monthly_cost_always_on(
+            idle_watts, extra_watts, electricity_rate_per_kwh, effective_hours
+        )
+        name = name or "Local (24/7 server)"
     else:
         raise ValueError(f"Unknown local cost mode: {mode!r}")
     tokens_produced = tokens_per_sec * 3600 * effective_hours
@@ -434,11 +658,20 @@ def build_local_row(
     else:
         coverage_pct = effective_hours / hours_needed * 100
         parallel_needed = hours_needed / HOURS_PER_MONTH
-        notes = (
-            f"running 24/7 all month at {tokens_per_sec:.1f} tok/s covers only "
-            f"~{coverage_pct:.0f}% of this workload's tokens — would need "
-            f"~{parallel_needed:.1f}x this throughput to fully replace hosted"
-        )
+        # When coverage rounds to 100 % the workload is effectively feasible
+        # (a rounding artefact) — show a clean note instead of the alarmist
+        # one that reads "covers only ~100 % … need ~1.0x".
+        if parallel_needed <= 1.05:
+            feasible = True
+            notes = (
+                f"~{effective_hours:.1f} compute-hrs/month at {tokens_per_sec:.1f} tok/s"
+            )
+        else:
+            notes = (
+                f"running 24/7 all month at {tokens_per_sec:.1f} tok/s covers only "
+                f"~{coverage_pct:.0f}% of this workload's tokens — would need "
+                f"~{parallel_needed:.1f}x this throughput to fully replace hosted"
+            )
     return ComparisonRow(name, monthly_cost, per_million, notes, feasible=feasible)
 
 
@@ -1147,6 +1380,37 @@ def benchmark_openai_compatible(
 
 
 # --------------------------------------------------------------------------
+# Last-run persistence (save/restore interactive defaults)
+# --------------------------------------------------------------------------
+
+
+def save_last_run(settings: dict, path: Path = DEFAULT_LAST_RUN_PATH) -> None:
+    """Persist interactive run settings so the next run can reuse them as defaults.
+
+    The saved JSON is a flat dict of the raw values entered (before they get
+    closed into a row-builder lambda), annotated with a ``last_run_at``
+    timestamp.
+    """
+    payload = dict(settings)
+    payload["last_run_at"] = datetime.now(timezone.utc).isoformat()
+    with open(path, "w", encoding="utf-8") as f:
+        json.dump(payload, f, indent=2)
+
+
+def load_last_run(path: Path = DEFAULT_LAST_RUN_PATH) -> Optional[dict]:
+    """Return the settings saved by the previous interactive run, or ``None``.
+
+    Returns ``None`` when the file does not exist or is unreadable (a
+    corrupted last-run file shouldn't block the script).
+    """
+    try:
+        with open(path, "r", encoding="utf-8") as f:
+            return json.load(f)
+    except (FileNotFoundError, json.JSONDecodeError, OSError):
+        return None
+
+
+# --------------------------------------------------------------------------
 # Interactive prompt helpers (thin I/O layer over the pure functions above)
 # --------------------------------------------------------------------------
 
@@ -1198,7 +1462,7 @@ def prompt_yes_no(prompt: str, default: bool = True) -> bool:
 
 
 def interactive_local_setup() -> tuple:
-    """Returns ``(row_builder, display_currency, usd_per_gbp, tokens_per_sec)``.
+    """Returns ``(row_builder, display_currency, usd_per_gbp, tokens_per_sec, settings)``.
 
     ``display_currency`` is ``"GBP"`` only when the user chose to pay
     electricity in GBP in ``"existing"`` mode; ``usd_per_gbp`` is the rate to
@@ -1207,6 +1471,8 @@ def interactive_local_setup() -> tuple:
     scale each scenario's workload to what this throughput can actually
     produce (see ``scale_workload_to_local_capacity``) before pricing both
     local and hosted rows against it.
+    ``settings`` is a dict of the raw values entered, suitable for passing to
+    ``save_last_run()`` so the next run can reuse them as defaults.
     """
     print("\n== Local setup ==")
     gpu_info = None
@@ -1311,6 +1577,14 @@ def interactive_local_setup() -> tuple:
         electricity_rate = prompt_float(
             "Electricity rate (USD/kWh)", default=0.15, minimum=0
         )
+        settings = {
+            "mode": "own",
+            "tokens_per_sec": tokens_per_sec,
+            "hardware_cost": hardware_cost,
+            "lifetime_years": lifetime_years,
+            "power_watts": power_watts,
+            "electricity_rate_per_kwh": electricity_rate,
+        }
         return (
             lambda workload: [
                 build_local_row(
@@ -1326,6 +1600,7 @@ def interactive_local_setup() -> tuple:
             "USD",
             None,
             tokens_per_sec,
+            settings,
         )
     elif mode == "existing":
         idle_draw = gpu_info.get("power_draw_w") if gpu_info else None
@@ -1449,23 +1724,38 @@ def interactive_local_setup() -> tuple:
                     "existing",
                     power_watts=power_watts_extra,
                     electricity_rate_per_kwh=electricity_rate,
-                    name="Local (electricity only — machine already on for other reasons)",
+                    name="Local (already-on PC)",
                 ),
                 build_local_row(
                     workload,
                     tokens_per_sec,
-                    "existing",
-                    power_watts=power_watts_total,
+                    "always_on",
+                    idle_watts=power_watts_total - power_watts_extra,
+                    extra_watts=power_watts_extra,
                     electricity_rate_per_kwh=electricity_rate,
-                    name="Local (electricity only — machine only powered on for this)",
+                    name="Local (kept on 24/7)",
                 ),
             ]
 
-        return build_existing_rows, display_currency, usd_per_gbp, tokens_per_sec
+        settings = {
+            "mode": "existing",
+            "tokens_per_sec": tokens_per_sec,
+            "power_watts_extra": power_watts_extra,
+            "power_watts_total": power_watts_total,
+            "electricity_rate_per_kwh": electricity_rate,
+            "display_currency": display_currency,
+            "usd_per_gbp": usd_per_gbp,
+        }
+        return build_existing_rows, display_currency, usd_per_gbp, tokens_per_sec, settings
     else:
         hourly_rate = prompt_float(
             "Rented GPU hourly rate (USD/hr)", default=2.50, minimum=0
         )
+        settings = {
+            "mode": "rent",
+            "tokens_per_sec": tokens_per_sec,
+            "hourly_rate": hourly_rate,
+        }
         return (
             lambda workload: [
                 build_local_row(
@@ -1475,6 +1765,7 @@ def interactive_local_setup() -> tuple:
             "USD",
             None,
             tokens_per_sec,
+            settings,
         )
 
 
@@ -1493,15 +1784,18 @@ def interactive_provider_selection(pricing: dict) -> Optional[set]:
     return selected or None
 
 
-def run_interactive() -> int:
-    """Compare local hardware running flat-out, 24/7, against hosted providers.
+def run_interactive(use_defaults: bool = False) -> int:
+    """Compare local hardware vs hosted providers for a fixed workload.
 
-    There's no workload-size question here — traffic-level presets mostly
-    converged to the same answer anyway once a slower local setup couldn't
-    keep up (every infeasible preset scaled to the same capacity ceiling),
-    so the comparison is sized directly from what the local hardware can
-    actually produce in a real month instead (see
-    ``local_max_capacity_workload``).
+    Uses a representative low-volume workload (96 requests/day — roughly
+    one every 15 minutes, ~2.3 M tokens/month) so the 24/7-server row
+    shows its real idle-cost penalty against serverless APIs that charge
+    zero when idle.
+
+    When ``use_defaults`` is True, saved settings from a previous run are
+    used without prompting (equivalent to passing ``--use-defaults`` on the
+    command line).  If no saved file exists the flag is a no-op and the
+    normal interactive flow runs instead.
     """
     print("LLM Cost Comparison — local vs hosted APIs")
     print("=" * 60)
@@ -1510,26 +1804,120 @@ def run_interactive() -> int:
     note = pricing.get("note", "")
     print(f"Hosted pricing as of {as_of}. {note}\n")
 
-    local_row_builder, display_currency, usd_per_gbp, tokens_per_sec = (
-        interactive_local_setup()
-    )
-    selected = interactive_provider_selection(pricing)
+    defaults = None
+    saved = load_last_run()
+    if saved is not None:
+        saved_at = saved.get("last_run_at", "unknown")
+        if use_defaults:
+            print(f"Using saved settings from last run ({saved_at}).")
+            defaults = saved
+        else:
+            print(f"Saved settings from last run found ({saved_at}).")
+            if prompt_yes_no("Use them as defaults?", default=True):
+                defaults = saved
+        print()
 
-    workload = local_max_capacity_workload(tokens_per_sec)
+    if defaults is not None:
+        # Fast path: replay saved settings — no prompts at all.
+        settings = dict(defaults)
+        tokens_per_sec = settings["tokens_per_sec"]
+        mode = settings["mode"]
+
+        if mode == "own":
+            local_row_builder = lambda workload: [
+                build_local_row(
+                    workload, tokens_per_sec, "own",
+                    hardware_cost=settings["hardware_cost"],
+                    lifetime_years=settings["lifetime_years"],
+                    power_watts=settings["power_watts"],
+                    electricity_rate_per_kwh=settings["electricity_rate_per_kwh"],
+                )
+            ]
+            display_currency = "USD"
+            usd_per_gbp = None
+        elif mode == "existing":
+            display_currency = settings.get("display_currency", "USD")
+            usd_per_gbp = settings.get("usd_per_gbp")
+            electricity_rate = settings["electricity_rate_per_kwh"]
+
+            # Saved electricity / FX rates go stale quickly — re-fetch when
+            # the original run paid in GBP so the numbers stay current.
+            if display_currency == "GBP":
+                fresh_gbp = fetch_octopus_agile_rate()
+                fresh_fx = fetch_fx_rate("GBP", "USD")
+                if fresh_gbp is not None and fresh_fx is not None:
+                    electricity_rate = fresh_gbp * fresh_fx
+                    usd_per_gbp = fresh_fx
+                    settings["electricity_rate_per_kwh"] = electricity_rate
+                    settings["usd_per_gbp"] = fresh_fx
+                    print(f"  Fresh Octopus rate: £{fresh_gbp:.4f}/kWh, "
+                          f"GBP→USD: {fresh_fx:.4f}")
+                elif fresh_gbp is not None:
+                    # FX fetch failed — convert with saved rate so at least
+                    # the electricity rate is current.
+                    electricity_rate = fresh_gbp * (usd_per_gbp or 1.27)
+                    settings["electricity_rate_per_kwh"] = electricity_rate
+                    print(f"  Fresh Octopus rate: £{fresh_gbp:.4f}/kWh "
+                          f"(FX rate unchanged: {usd_per_gbp or 1.27:.4f})")
+                elif fresh_fx is not None:
+                    usd_per_gbp = fresh_fx
+                    settings["usd_per_gbp"] = fresh_fx
+                    print(f"  Fresh GBP→USD: {fresh_fx:.4f} (electricity rate unchanged)")
+
+            local_row_builder = lambda workload: [
+                build_local_row(
+                    workload, tokens_per_sec, "existing",
+                    power_watts=settings["power_watts_extra"],
+                    electricity_rate_per_kwh=electricity_rate,
+                    name="Local (already-on PC)",
+                ),
+                build_local_row(
+                    workload, tokens_per_sec, "always_on",
+                    idle_watts=settings["power_watts_total"] - settings["power_watts_extra"],
+                    extra_watts=settings["power_watts_extra"],
+                    electricity_rate_per_kwh=electricity_rate,
+                    name="Local (kept on 24/7)",
+                ),
+            ]
+        else:  # rent
+            local_row_builder = lambda workload: [
+                build_local_row(
+                    workload, tokens_per_sec, "rent",
+                    hourly_rate=settings["hourly_rate"],
+                )
+            ]
+            display_currency = "USD"
+            usd_per_gbp = None
+
+        selected_models = settings.get("selected_models")
+        selected = set(selected_models) if selected_models else None
+
+        print(f"  Mode: {mode}, {tokens_per_sec:.1f} tok/s")
+        if selected:
+            print(f"  Providers: {', '.join(sorted(selected))}")
+        else:
+            print("  Providers: all")
+        print()
+    else:
+        local_row_builder, display_currency, usd_per_gbp, tokens_per_sec, settings = (
+            interactive_local_setup()
+        )
+        selected = interactive_provider_selection(pricing)
+        settings["selected_models"] = (
+            sorted(selected) if selected else None
+        )
+
+    workload = Workload(
+        requests_per_day=96,   # one request every 15 minutes
+        avg_input_tokens=500,
+        avg_output_tokens=300,
+    )
     rows = list(local_row_builder(workload))
     rows.extend(build_hosted_rows(workload, pricing, selected))
     if display_currency == "GBP":
         rows = convert_rows_currency(rows, usd_per_gbp)
 
-    print("\n== Results: Local at maximum capacity ==")
-    print(
-        f"Local hardware can produce {workload.monthly_total_tokens:,.0f} "
-        f"tokens/month running 24/7 at {tokens_per_sec:.1f} tok/s (assuming a "
-        f"{DEFAULT_AVG_INPUT_TOKENS:.0f}:{DEFAULT_AVG_OUTPUT_TOKENS:.0f} "
-        "input:output token ratio per request, since hosted providers price "
-        "those differently)."
-    )
-    print()
+    print("\n== Results ==")
     print(render_table(rows, currency=display_currency))
 
     if prompt_yes_no("\nExport results to a file?", default=False):
@@ -1543,6 +1931,12 @@ def run_interactive() -> int:
         else:
             export_json(rows, out_path, currency=display_currency)
         print(f"Wrote {out_path}")
+
+    if defaults is None and prompt_yes_no(
+        "\nSave these settings as defaults for the next run?", default=False
+    ):
+        save_last_run(settings)
+        print(f"Saved {DEFAULT_LAST_RUN_PATH}")
 
     return 0
 
@@ -1838,7 +2232,27 @@ def main(argv: Optional[list] = None) -> int:
         "--export", choices=["csv", "json"], help="Export results in this format."
     )
     parser.add_argument("--export-path", type=Path, help="Path to write the export to.")
+    parser.add_argument(
+        "--use-defaults",
+        action="store_true",
+        help="Skip prompts and reuse settings saved by a previous interactive run.",
+    )
+    parser.add_argument(
+        "--update-pricing",
+        action="store_true",
+        help="Fetch latest DeepSeek pricing from the official API docs and exit.",
+    )
     args = parser.parse_args(argv)
+
+    if args.update_pricing:
+        ok_ds = fetch_deepseek_pricing()
+        ok_bd = fetch_bedrock_pricing()
+        if ok_ds or ok_bd:
+            print(f"Updated {DEFAULT_PRICING_PATH}")
+            return 0
+        print("Failed to fetch pricing — check your network or try again later.",
+              file=sys.stderr)
+        return 1
 
     if args.non_interactive:
         if not args.config:
@@ -1862,7 +2276,7 @@ def main(argv: Optional[list] = None) -> int:
         )
 
     try:
-        return run_interactive()
+        return run_interactive(use_defaults=args.use_defaults)
     except (KeyboardInterrupt, EOFError):
         print("\nCancelled.")
         return 1

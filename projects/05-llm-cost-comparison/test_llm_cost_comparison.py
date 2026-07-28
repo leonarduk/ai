@@ -163,7 +163,7 @@ def test_build_local_row_owned():
         power_watts=450,
         electricity_rate_per_kwh=0.15,
     )
-    assert row.name == "Local (buying new hardware)"
+    assert row.name == "Local (buy hardware)"
     assert row.monthly_cost > 0
     assert row.cost_per_million_tokens > 0
     assert "compute-hrs/month" in row.notes
@@ -661,12 +661,12 @@ def test_run_non_interactive_end_to_end(tmp_path: Path, capsys):
 
     assert exit_code == 0
     out = capsys.readouterr().out
-    assert "Local (buying new hardware)" in out
+    assert "Local (buy hardware)" in out
     assert "Claude Opus 5" in out
     assert export_path.exists()
     exported = json.loads(export_path.read_text(encoding="utf-8"))
     assert {row["option"] for row in exported} == {
-        "Local (buying new hardware)",
+        "Local (buy hardware)",
         "Claude Opus 5",
     }
 
@@ -1398,7 +1398,7 @@ def test_build_local_row_existing_hardware():
         power_watts=450,
         electricity_rate_per_kwh=0.15,
     )
-    assert row.name == "Local (electricity only — hardware already owned)"
+    assert row.name == "Local (already-on PC)"
     assert row.monthly_cost > 0
     # No amortization component: cheaper than the "buying" mode for the same power/rate.
     buying_row = m.build_local_row(
@@ -1448,7 +1448,7 @@ def test_run_non_interactive_existing_mode(tmp_path: Path, capsys):
 
     exit_code = m.run_non_interactive(config_path, export_fmt=None, export_path=None)
     assert exit_code == 0
-    assert "electricity only" in capsys.readouterr().out
+    assert "already-on PC" in capsys.readouterr().out
 
 
 def test_run_non_interactive_existing_mode_missing_fields_raises_config_error(
