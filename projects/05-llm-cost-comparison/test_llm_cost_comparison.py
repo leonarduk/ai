@@ -129,7 +129,7 @@ def test_build_local_row_owned():
         power_watts=450,
         electricity_rate_per_kwh=0.15,
     )
-    assert row.name == "Local (owned hardware)"
+    assert row.name == "Local (buying new hardware)"
     assert row.monthly_cost > 0
     assert row.cost_per_million_tokens > 0
     assert "compute-hrs/month" in row.notes
@@ -385,12 +385,12 @@ def test_run_non_interactive_end_to_end(tmp_path: Path, capsys):
 
     assert exit_code == 0
     out = capsys.readouterr().out
-    assert "Local (owned hardware)" in out
+    assert "Local (buying new hardware)" in out
     assert "Claude Opus 5" in out
     assert export_path.exists()
     exported = json.loads(export_path.read_text(encoding="utf-8"))
     assert {row["option"] for row in exported} == {
-        "Local (owned hardware)",
+        "Local (buying new hardware)",
         "Claude Opus 5",
     }
 
@@ -816,29 +816,75 @@ def test_run_non_interactive_allows_zero_output_tokens_for_input_only_workload(
 
 
 # --------------------------------------------------------------------------
-# interactive_workload zero-token guard
+# Workload presets
 # --------------------------------------------------------------------------
 
 
-def test_interactive_workload_reprompts_on_zero_total_tokens(monkeypatch, capsys):
-    # First pass: requests_per_day=0 -> zero total tokens, must reprompt.
-    # Second pass: valid answers.
-    answers = iter(["0", "500", "300", "1000", "500", "300"])
+def test_get_preset_returns_matching_preset():
+    preset = m.get_preset("casual")
+    assert preset.key == "casual"
+    assert preset.to_workload().monthly_total_tokens > 0
+
+
+def test_get_preset_raises_config_error_for_unknown_key():
+    with pytest.raises(m.ConfigError, match="unknown workload preset"):
+        m.get_preset("does_not_exist")
+
+
+def test_every_preset_has_positive_total_tokens():
+    for preset in m.WORKLOAD_PRESETS:
+        assert preset.to_workload().monthly_total_tokens > 0
+
+
+# --------------------------------------------------------------------------
+# interactive_workload scenario menu
+# --------------------------------------------------------------------------
+
+_NUM_PRESETS = len(m.WORKLOAD_PRESETS)
+_ALL_OPTION = str(_NUM_PRESETS + 1)
+_CUSTOM_OPTION = str(_NUM_PRESETS + 2)
+
+
+def test_interactive_workload_selects_single_preset(monkeypatch):
+    monkeypatch.setattr("builtins.input", lambda _: "1")
+    scenarios = m.interactive_workload()
+    assert len(scenarios) == 1
+    key, label, workload = scenarios[0]
+    assert key == m.WORKLOAD_PRESETS[0].key
+    assert label == m.WORKLOAD_PRESETS[0].label
+    assert workload.monthly_total_tokens > 0
+
+
+def test_interactive_workload_compare_all_returns_every_preset(monkeypatch):
+    monkeypatch.setattr("builtins.input", lambda _: _ALL_OPTION)
+    scenarios = m.interactive_workload()
+    assert [key for key, _, _ in scenarios] == [p.key for p in m.WORKLOAD_PRESETS]
+
+
+def test_interactive_workload_custom_reprompts_on_zero_total_tokens(
+    monkeypatch, capsys
+):
+    # Select "custom", then: requests_per_day=0 -> zero total tokens (reprompt),
+    # then valid answers.
+    answers = iter([_CUSTOM_OPTION, "0", "500", "300", "1000", "500", "300"])
     monkeypatch.setattr("builtins.input", lambda _: next(answers))
 
-    workload = m.interactive_workload()
-
+    scenarios = m.interactive_workload()
+    assert len(scenarios) == 1
+    key, label, workload = scenarios[0]
+    assert key == "custom"
     assert workload.requests_per_day == 1000
     assert workload.monthly_total_tokens > 0
     assert "zero total tokens" in capsys.readouterr().out
 
 
-def test_interactive_workload_accepts_zero_output_tokens_alone(monkeypatch):
+def test_interactive_workload_custom_accepts_zero_output_tokens_alone(monkeypatch):
     # avg_output_tokens == 0 alone is fine as long as total tokens is positive.
-    answers = iter(["1000", "500", "0"])
+    answers = iter([_CUSTOM_OPTION, "1000", "500", "0"])
     monkeypatch.setattr("builtins.input", lambda _: next(answers))
 
-    workload = m.interactive_workload()
+    scenarios = m.interactive_workload()
+    _key, _label, workload = scenarios[0]
     assert workload.avg_output_tokens == 0
     assert workload.monthly_total_tokens > 0
 
@@ -848,3 +894,289 @@ def test_render_table_omits_multiple_line_for_single_row():
     table = m.render_table(rows)
     assert "Only option" in table
     assert "most expensive option is" not in table
+
+
+# --------------------------------------------------------------------------
+# "Already own the hardware" cost mode (electricity only, no amortization)
+# --------------------------------------------------------------------------
+
+
+def test_local_monthly_cost_existing_hardware_is_electricity_only():
+    # 1 kW * $0.10/hr * 10 hr = $1.00, with zero fixed/amortized cost
+    cost = m.local_monthly_cost_existing_hardware(
+        power_watts=1000, electricity_rate_per_kwh=0.10, hours_needed_per_month=10
+    )
+    assert cost == pytest.approx(1.0)
+
+
+def test_local_monthly_cost_existing_hardware_zero_hours_is_free():
+    cost = m.local_monthly_cost_existing_hardware(
+        power_watts=450, electricity_rate_per_kwh=0.15, hours_needed_per_month=0
+    )
+    assert cost == 0.0
+
+
+def test_build_local_row_existing_hardware():
+    w = m.Workload(requests_per_day=100, avg_input_tokens=500, avg_output_tokens=500)
+    row = m.build_local_row(
+        w,
+        tokens_per_sec=100,
+        mode="existing",
+        power_watts=450,
+        electricity_rate_per_kwh=0.15,
+    )
+    assert row.name == "Local (electricity only — hardware already owned)"
+    assert row.monthly_cost > 0
+    # No amortization component: cheaper than the "buying" mode for the same power/rate.
+    buying_row = m.build_local_row(
+        w,
+        tokens_per_sec=100,
+        mode="own",
+        hardware_cost=1600,
+        lifetime_years=3,
+        power_watts=450,
+        electricity_rate_per_kwh=0.15,
+    )
+    assert row.monthly_cost < buying_row.monthly_cost
+
+
+def test_run_non_interactive_existing_mode(tmp_path: Path, capsys):
+    pricing_path = tmp_path / "pricing.json"
+    _write_pricing(pricing_path)
+    config_path = tmp_path / "config.json"
+    config = {
+        "workload": {
+            "requests_per_day": 1000,
+            "avg_input_tokens": 500,
+            "avg_output_tokens": 300,
+        },
+        "local": {
+            "mode": "existing",
+            "tokens_per_sec": 40,
+            "power_watts": 450,
+            "electricity_rate_per_kwh": 0.15,
+        },
+        "pricing_file": str(pricing_path),
+    }
+    config_path.write_text(json.dumps(config), encoding="utf-8")
+
+    exit_code = m.run_non_interactive(config_path, export_fmt=None, export_path=None)
+    assert exit_code == 0
+    assert "electricity only" in capsys.readouterr().out
+
+
+def test_run_non_interactive_existing_mode_missing_fields_raises_config_error(
+    tmp_path: Path,
+):
+    pricing_path = tmp_path / "pricing.json"
+    _write_pricing(pricing_path)
+    config_path = tmp_path / "config.json"
+    config = {
+        "workload": {
+            "requests_per_day": 1000,
+            "avg_input_tokens": 500,
+            "avg_output_tokens": 300,
+        },
+        "local": {
+            "mode": "existing",
+            "tokens_per_sec": 40,
+        },  # missing power_watts, rate
+        "pricing_file": str(pricing_path),
+    }
+    config_path.write_text(json.dumps(config), encoding="utf-8")
+
+    with pytest.raises(m.ConfigError, match="power_watts"):
+        m.run_non_interactive(config_path, export_fmt=None, export_path=None)
+
+
+# --------------------------------------------------------------------------
+# GPU price/power lookup
+# --------------------------------------------------------------------------
+
+
+def test_lookup_gpu_defaults_matches_known_card():
+    result = m.lookup_gpu_defaults("NVIDIA GeForce RTX 4090")
+    assert result is not None
+    cost, power = result
+    assert cost > 0
+    assert power > 0
+
+
+def test_lookup_gpu_defaults_returns_none_for_unknown_card():
+    assert m.lookup_gpu_defaults("Some Future GPU Nobody Has Heard Of") is None
+
+
+def test_lookup_gpu_defaults_case_insensitive():
+    assert m.lookup_gpu_defaults("nvidia geforce rtx 4090") is not None
+
+
+# --------------------------------------------------------------------------
+# Local model discovery (mocked urllib — no real server needed)
+# --------------------------------------------------------------------------
+
+
+def test_list_ollama_models_parses_tags_response(monkeypatch):
+    body = json.dumps(
+        {"models": [{"name": "llama3:8b"}, {"name": "mistral:7b"}]}
+    ).encode("utf-8")
+
+    def fake_urlopen(req, timeout=None):
+        return _FakeHTTPResponse(body)
+
+    monkeypatch.setattr(m.urllib.request, "urlopen", fake_urlopen)
+    assert m.list_ollama_models("http://localhost:11434") == ["llama3:8b", "mistral:7b"]
+
+
+def test_list_running_ollama_models_parses_ps_response(monkeypatch):
+    body = json.dumps({"models": [{"name": "llama3:8b"}]}).encode("utf-8")
+
+    def fake_urlopen(req, timeout=None):
+        return _FakeHTTPResponse(body)
+
+    monkeypatch.setattr(m.urllib.request, "urlopen", fake_urlopen)
+    assert m.list_running_ollama_models("http://localhost:11434") == ["llama3:8b"]
+
+
+def test_list_openai_compatible_models_parses_models_response(monkeypatch):
+    body = json.dumps(
+        {"data": [{"id": "local-model-a"}, {"id": "local-model-b"}]}
+    ).encode("utf-8")
+
+    def fake_urlopen(req, timeout=None):
+        return _FakeHTTPResponse(body)
+
+    monkeypatch.setattr(m.urllib.request, "urlopen", fake_urlopen)
+    assert m.list_openai_compatible_models("http://localhost:1234") == [
+        "local-model-a",
+        "local-model-b",
+    ]
+
+
+def test_discover_local_models_prefers_running_over_installed_for_ollama(monkeypatch):
+    def fake_urlopen(req, timeout=None):
+        if req.full_url.endswith("/api/ps"):
+            return _FakeHTTPResponse(
+                json.dumps({"models": [{"name": "running-model"}]}).encode()
+            )
+        return _FakeHTTPResponse(
+            json.dumps(
+                {"models": [{"name": "installed-a"}, {"name": "installed-b"}]}
+            ).encode()
+        )
+
+    monkeypatch.setattr(m.urllib.request, "urlopen", fake_urlopen)
+    assert m.discover_local_models("ollama", "http://localhost:11434") == [
+        "running-model"
+    ]
+
+
+def test_discover_local_models_falls_back_to_installed_when_none_running(monkeypatch):
+    def fake_urlopen(req, timeout=None):
+        if req.full_url.endswith("/api/ps"):
+            return _FakeHTTPResponse(json.dumps({"models": []}).encode())
+        return _FakeHTTPResponse(
+            json.dumps({"models": [{"name": "installed-a"}]}).encode()
+        )
+
+    monkeypatch.setattr(m.urllib.request, "urlopen", fake_urlopen)
+    assert m.discover_local_models("ollama", "http://localhost:11434") == [
+        "installed-a"
+    ]
+
+
+def test_discover_local_models_returns_empty_list_on_failure(monkeypatch):
+    def fake_urlopen(req, timeout=None):
+        raise OSError("connection refused")
+
+    monkeypatch.setattr(m.urllib.request, "urlopen", fake_urlopen)
+    assert m.discover_local_models("ollama", "http://localhost:11434") == []
+    assert m.discover_local_models("openai", "http://localhost:1234") == []
+
+
+# --------------------------------------------------------------------------
+# _resolve_workload_scenarios
+# --------------------------------------------------------------------------
+
+
+def test_resolve_workload_scenarios_explicit_workload():
+    config = {
+        "workload": {
+            "requests_per_day": 1000,
+            "avg_input_tokens": 500,
+            "avg_output_tokens": 300,
+        }
+    }
+    scenarios = m._resolve_workload_scenarios(config)
+    assert len(scenarios) == 1
+    assert scenarios[0][0] == "custom"
+
+
+def test_resolve_workload_scenarios_single_preset():
+    scenarios = m._resolve_workload_scenarios({"workload_preset": "coding_agent"})
+    assert len(scenarios) == 1
+    assert scenarios[0][0] == "coding_agent"
+
+
+def test_resolve_workload_scenarios_multiple_presets():
+    scenarios = m._resolve_workload_scenarios(
+        {"workload_presets": ["casual", "team_tool"]}
+    )
+    assert [key for key, _, _ in scenarios] == ["casual", "team_tool"]
+
+
+def test_resolve_workload_scenarios_requires_exactly_one_source():
+    with pytest.raises(m.ConfigError, match="must include one of"):
+        m._resolve_workload_scenarios({})
+    with pytest.raises(m.ConfigError, match="must include only one of"):
+        m._resolve_workload_scenarios(
+            {
+                "workload": {
+                    "requests_per_day": 1,
+                    "avg_input_tokens": 1,
+                    "avg_output_tokens": 1,
+                },
+                "workload_preset": "casual",
+            }
+        )
+
+
+def test_resolve_workload_scenarios_unknown_preset_key_raises():
+    with pytest.raises(m.ConfigError, match="unknown workload preset"):
+        m._resolve_workload_scenarios({"workload_preset": "not_a_real_preset"})
+
+
+# --------------------------------------------------------------------------
+# run_non_interactive with multiple preset scenarios (per-scenario export)
+# --------------------------------------------------------------------------
+
+
+def test_run_non_interactive_multiple_presets_prints_each_and_exports_per_scenario(
+    tmp_path: Path, capsys
+):
+    pricing_path = tmp_path / "pricing.json"
+    _write_pricing(pricing_path)
+    config_path = tmp_path / "config.json"
+    config = {
+        "workload_presets": ["casual", "coding_agent"],
+        "local": {
+            "mode": "existing",
+            "tokens_per_sec": 40,
+            "power_watts": 450,
+            "electricity_rate_per_kwh": 0.15,
+        },
+        "pricing_file": str(pricing_path),
+    }
+    config_path.write_text(json.dumps(config), encoding="utf-8")
+
+    export_path = tmp_path / "out.json"
+    exit_code = m.run_non_interactive(
+        config_path, export_fmt="json", export_path=export_path
+    )
+
+    assert exit_code == 0
+    out = capsys.readouterr().out
+    assert "Casual personal use" in out
+    assert "Autonomous coding agent" in out
+    assert (tmp_path / "out_casual.json").exists()
+    assert (tmp_path / "out_coding_agent.json").exists()
+    assert not export_path.exists()  # suffixed per scenario, not the bare path

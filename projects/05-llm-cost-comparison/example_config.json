@@ -1,13 +1,7 @@
 {
-  "workload": {
-    "requests_per_day": 1000,
-    "avg_input_tokens": 500,
-    "avg_output_tokens": 300
-  },
+  "workload_presets": ["casual", "daily_assistant", "coding_agent"],
   "local": {
-    "mode": "own",
-    "hardware_cost": 1600,
-    "lifetime_years": 3,
+    "mode": "existing",
     "power_watts": 450,
     "electricity_rate_per_kwh": 0.15,
     "tokens_per_sec": 40

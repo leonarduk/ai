@@ -42,6 +42,15 @@ DAYS_PER_MONTH = 30
 HOURS_PER_MONTH = DAYS_PER_MONTH * 24
 
 
+class ConfigError(ValueError):
+    """Raised for a malformed --non-interactive config, or an unknown preset key.
+
+    Deliberately distinct from a bare ``KeyError``/``TypeError`` traceback:
+    this is user-facing config, so a missing or misspelled field should say
+    exactly what's missing rather than dumping a Python stack trace.
+    """
+
+
 # --------------------------------------------------------------------------
 # Pricing
 # --------------------------------------------------------------------------
@@ -88,6 +97,92 @@ class Workload:
     @property
     def monthly_total_tokens(self) -> float:
         return self.monthly_input_tokens + self.monthly_output_tokens
+
+
+@dataclass(frozen=True)
+class WorkloadPreset:
+    """A named, plain-language traffic scenario.
+
+    Guessing "requests per day" and "average input tokens" cold is a bad
+    starting point for someone who has never measured their own usage.
+    Presets give a menu of scenarios described in terms people actually
+    reason in ("a live app serving many users"), with the underlying numbers
+    filled in — while still leaving room for a fully custom entry.
+    """
+
+    key: str
+    label: str
+    description: str
+    requests_per_day: float
+    avg_input_tokens: float
+    avg_output_tokens: float
+
+    def to_workload(self) -> Workload:
+        return Workload(
+            self.requests_per_day, self.avg_input_tokens, self.avg_output_tokens
+        )
+
+
+WORKLOAD_PRESETS: tuple = (
+    WorkloadPreset(
+        key="casual",
+        label="Casual personal use",
+        description=(
+            "A handful of questions a day, similar to using it instead of a search engine."
+        ),
+        requests_per_day=20,
+        avg_input_tokens=300,
+        avg_output_tokens=250,
+    ),
+    WorkloadPreset(
+        key="daily_assistant",
+        label="Daily work assistant",
+        description=(
+            "Used on and off throughout the workday for drafting, research, and quick "
+            "coding help."
+        ),
+        requests_per_day=150,
+        avg_input_tokens=800,
+        avg_output_tokens=500,
+    ),
+    WorkloadPreset(
+        key="coding_agent",
+        label="Autonomous coding agent",
+        description=(
+            "An agent that reads files and runs commands on its own (like an AI coding "
+            "assistant). Each turn re-sends a lot of file/context content, so input "
+            "tokens are large relative to output."
+        ),
+        requests_per_day=500,
+        avg_input_tokens=4000,
+        avg_output_tokens=800,
+    ),
+    WorkloadPreset(
+        key="team_tool",
+        label="Small team internal tool",
+        description="A shared assistant used by a small team (roughly 5-20 people) all day.",
+        requests_per_day=2000,
+        avg_input_tokens=600,
+        avg_output_tokens=400,
+    ),
+    WorkloadPreset(
+        key="production_app",
+        label="Production customer-facing app",
+        description="A live app serving many users' requests around the clock.",
+        requests_per_day=50000,
+        avg_input_tokens=500,
+        avg_output_tokens=300,
+    ),
+)
+
+
+def get_preset(key: str) -> WorkloadPreset:
+    """Look up a preset by key, raising ``ConfigError`` with valid keys listed."""
+    for preset in WORKLOAD_PRESETS:
+        if preset.key == key:
+            return preset
+    valid = ", ".join(p.key for p in WORKLOAD_PRESETS)
+    raise ConfigError(f"unknown workload preset {key!r}; valid presets: {valid}")
 
 
 # --------------------------------------------------------------------------
@@ -153,6 +248,26 @@ def local_monthly_cost_rented(
     return hourly_rate * hours_needed_per_month
 
 
+def local_monthly_cost_existing_hardware(
+    power_watts: float, electricity_rate_per_kwh: float, hours_needed_per_month: float
+) -> float:
+    """Monthly cost when the PC/GPU is already owned for other reasons.
+
+    No hardware amortization at all — unlike ``local_monthly_cost_owned``,
+    this assumes the machine exists (and its cost is sunk) regardless of
+    whether it's ever used for a local LLM. The only cost attributable to
+    that use is the extra electricity consumed while it runs. ``power_watts``
+    should reflect whichever basis applies:
+      * If the machine is already on for other reasons, use the *extra*
+        draw the GPU/CPU pull under load, above idle.
+      * If it's only powered on to run the local LLM, use the *whole
+        system's* draw while running (GPU plus CPU, RAM, storage, etc.) —
+        the entire session's electricity is attributable to this use.
+    """
+    power_kw = power_watts / 1000
+    return power_kw * electricity_rate_per_kwh * hours_needed_per_month
+
+
 def cost_per_million_tokens(monthly_cost: float, monthly_total_tokens: float) -> float:
     """Blended $/1M tokens (input+output combined) for a given monthly cost.
 
@@ -199,7 +314,12 @@ def build_local_row(
             electricity_rate_per_kwh,
             hours_needed,
         )
-        name = "Local (owned hardware)"
+        name = "Local (buying new hardware)"
+    elif mode == "existing":
+        monthly_cost = local_monthly_cost_existing_hardware(
+            power_watts, electricity_rate_per_kwh, hours_needed
+        )
+        name = "Local (electricity only — hardware already owned)"
     elif mode == "rent":
         monthly_cost = local_monthly_cost_rented(hourly_rate, hours_needed)
         name = "Local (rented cloud GPU)"
@@ -349,6 +469,43 @@ def detect_nvidia_gpu(runner: Callable = subprocess.run) -> Optional[dict]:
     }
 
 
+# Rough street price (USD) and typical power draw under load (W) for common
+# GPUs, matched by substring against a detected card's name. These are
+# ballpark figures meant to prefill a realistic starting point instead of a
+# one-size-fits-all guess — the interactive prompt still lets the user
+# override either value if theirs differs.
+GPU_COST_POWER_DEFAULTS: tuple = (
+    ("RTX 4090", 1600.0, 450.0),
+    ("RTX 4080 SUPER", 1000.0, 320.0),
+    ("RTX 4080", 1000.0, 320.0),
+    ("RTX 4070 TI SUPER", 800.0, 285.0),
+    ("RTX 4070", 550.0, 200.0),
+    ("RTX 3090 TI", 900.0, 450.0),
+    ("RTX 3090", 800.0, 350.0),
+    ("RTX 3080", 500.0, 320.0),
+    ("RTX 3070", 400.0, 220.0),
+    ("RTX 6000 ADA", 6800.0, 300.0),
+    ("A100", 10000.0, 400.0),
+    ("H100", 25000.0, 700.0),
+)
+
+
+def lookup_gpu_defaults(gpu_name: str) -> Optional[tuple]:
+    """Best-effort ``(cost_usd, power_watts)`` defaults for a detected GPU.
+
+    Matches by substring against ``GPU_COST_POWER_DEFAULTS`` so a detected
+    card pre-fills a realistic price/power pair instead of a generic
+    default unrelated to the actual hardware. Returns None on no match —
+    callers fall back to a generic default and the prompt still lets the
+    user override.
+    """
+    name = gpu_name.upper()
+    for label, cost, power in GPU_COST_POWER_DEFAULTS:
+        if label in name:
+            return cost, power
+    return None
+
+
 def format_gpu_summary(gpu_info: dict) -> str:
     """Render a detected GPU's info for display.
 
@@ -364,6 +521,66 @@ def format_gpu_summary(gpu_info: dict) -> str:
     limit = gpu_info.get("power_limit_w")
     limit_s = f"{limit:.0f} W limit" if limit is not None else "power limit unknown"
     return f"{gpu_info['name']} ({mem_s}, {draw_s} / {limit_s})"
+
+
+# --------------------------------------------------------------------------
+# Local model discovery (best-effort, non-fatal)
+# --------------------------------------------------------------------------
+
+
+def list_ollama_models(base_url: str) -> list:
+    """List every model pulled into the local Ollama install (``GET /api/tags``)."""
+    _validate_http_url(base_url)
+    req = urllib.request.Request(f"{base_url.rstrip('/')}/api/tags", method="GET")
+    with urllib.request.urlopen(req, timeout=10) as resp:
+        data = json.loads(resp.read().decode("utf-8"))
+    return [m["name"] for m in data.get("models", []) if "name" in m]
+
+
+def list_running_ollama_models(base_url: str) -> list:
+    """List models Ollama currently has loaded in memory (``GET /api/ps``).
+
+    This is "what's actually loaded right now", which is the model any
+    benchmark request will hit — a better default than the full installed
+    list from ``list_ollama_models`` when both are available.
+    """
+    _validate_http_url(base_url)
+    req = urllib.request.Request(f"{base_url.rstrip('/')}/api/ps", method="GET")
+    with urllib.request.urlopen(req, timeout=10) as resp:
+        data = json.loads(resp.read().decode("utf-8"))
+    return [m["name"] for m in data.get("models", []) if "name" in m]
+
+
+def list_openai_compatible_models(base_url: str, api_key: Optional[str] = None) -> list:
+    """List models an OpenAI-compatible server reports as available (``GET /v1/models``)."""
+    _validate_http_url(base_url)
+    headers = {}
+    if api_key:
+        headers["Authorization"] = f"Bearer {api_key}"
+    req = urllib.request.Request(
+        f"{base_url.rstrip('/')}/v1/models", headers=headers, method="GET"
+    )
+    with urllib.request.urlopen(req, timeout=10) as resp:
+        data = json.loads(resp.read().decode("utf-8"))
+    return [m["id"] for m in data.get("data", []) if "id" in m]
+
+
+def discover_local_models(backend: str, base_url: str) -> list:
+    """Best-effort list of model names/ids available on a local endpoint.
+
+    For Ollama, currently-loaded models (if any) are preferred over the full
+    installed list, since that's what a benchmark request will actually hit.
+    Returns an empty list on any failure (unreachable endpoint, unexpected
+    response shape, etc.) — callers should treat that as "ask the user
+    manually", not as an error worth surfacing.
+    """
+    try:
+        if backend == "ollama":
+            running = list_running_ollama_models(base_url)
+            return running or list_ollama_models(base_url)
+        return list_openai_compatible_models(base_url)
+    except Exception:  # noqa: BLE001 - best-effort, any failure just falls back
+        return []
 
 
 # --------------------------------------------------------------------------
@@ -516,8 +733,7 @@ def prompt_yes_no(prompt: str, default: bool = True) -> bool:
     return raw.startswith("y")
 
 
-def interactive_workload() -> Workload:
-    print("\n== Workload ==")
+def _prompt_custom_workload() -> Workload:
     while True:
         requests_per_day = prompt_float("Requests per day", default=1000, minimum=0)
         avg_input = prompt_float(
@@ -533,6 +749,37 @@ def interactive_workload() -> Workload:
             "  That produces zero total tokens/month — set requests per day and at "
             "least one of input/output tokens above zero. Let's try again."
         )
+
+
+def interactive_workload() -> list:
+    """Prompt for one or more workload scenarios to compare.
+
+    Returns a list of ``(key, label, Workload)`` tuples — usually one, but
+    "compare all presets" returns one per preset so the caller can print (and
+    optionally export) a separate table per scenario.
+    """
+    print("\n== Workload ==")
+    print(
+        "How much traffic should this comparison assume? Guessing raw numbers "
+        "cold is hard, so pick a preset scenario below, compare all of them at "
+        "once, or enter your own numbers if none fit.\n"
+    )
+    for i, preset in enumerate(WORKLOAD_PRESETS, start=1):
+        print(f"  {i}. {preset.label} — {preset.description}")
+    all_option = len(WORKLOAD_PRESETS) + 1
+    custom_option = len(WORKLOAD_PRESETS) + 2
+    print(f"  {all_option}. Compare all of the above scenarios")
+    print(f"  {custom_option}. Enter my own numbers")
+
+    choices = [str(i) for i in range(1, custom_option + 1)]
+    choice = int(prompt_choice("Choice", choices, default=str(all_option)))
+
+    if choice <= len(WORKLOAD_PRESETS):
+        preset = WORKLOAD_PRESETS[choice - 1]
+        return [(preset.key, preset.label, preset.to_workload())]
+    if choice == all_option:
+        return [(p.key, p.label, p.to_workload()) for p in WORKLOAD_PRESETS]
+    return [("custom", "Custom", _prompt_custom_workload())]
 
 
 def interactive_local_setup() -> Callable[[Workload], ComparisonRow]:
@@ -559,7 +806,18 @@ def interactive_local_setup() -> Callable[[Workload], ComparisonRow]:
             input("Base URL [http://localhost:11434]: ").strip()
             or "http://localhost:11434"
         )
-        model = input("Model name as served locally: ").strip()
+
+        detected_models = discover_local_models(backend, base_url)
+        default_model = detected_models[0] if detected_models else None
+        if detected_models:
+            print(f"  Detected models: {', '.join(detected_models)}")
+        prompt_label = "Model name as served locally"
+        if default_model:
+            model = (
+                input(f"{prompt_label} [{default_model}]: ").strip() or default_model
+            )
+        else:
+            model = input(f"{prompt_label}: ").strip()
         try:
             if backend == "ollama":
                 tokens_per_sec = benchmark_ollama(base_url, model)
@@ -577,14 +835,36 @@ def interactive_local_setup() -> Callable[[Workload], ComparisonRow]:
             "Measured or estimated tokens/sec", default=40.0, minimum=0.001
         )
 
-    mode = prompt_choice("Hardware mode", ["own", "rent"], default="own")
-    if mode == "own":
-        default_power = (
-            gpu_info["power_limit_w"]
-            if gpu_info and gpu_info.get("power_limit_w")
-            else 450.0
+    print(
+        "\n  How should the cost of the hardware itself count?\n"
+        "    existing — You already have this PC/GPU for other reasons; only the extra\n"
+        "               electricity it uses while running counts (most people, most of\n"
+        "               the time).\n"
+        "    buying   — You're weighing whether to buy hardware specifically for this.\n"
+        "    rent     — You'd rent GPU time in the cloud instead of using your own machine.\n"
+    )
+    mode = prompt_choice(
+        "Hardware mode", ["existing", "buying", "rent"], default="existing"
+    )
+
+    if mode == "buying":
+        gpu_defaults = lookup_gpu_defaults(gpu_info["name"]) if gpu_info else None
+        if gpu_defaults:
+            default_cost, default_power = gpu_defaults
+            print(
+                f"  Using typical price/power for {gpu_info['name']}: "
+                f"${default_cost:,.0f}, {default_power:.0f} W — override below if yours differs."
+            )
+        else:
+            default_cost = 1600.0
+            default_power = (
+                gpu_info["power_limit_w"]
+                if gpu_info and gpu_info.get("power_limit_w")
+                else 450.0
+            )
+        hardware_cost = prompt_float(
+            "Hardware cost (USD)", default=default_cost, minimum=0
         )
-        hardware_cost = prompt_float("Hardware cost (USD)", default=1600.0, minimum=0)
         lifetime_years = prompt_float(
             "Expected hardware lifetime (years)", default=3.0, minimum=0.001
         )
@@ -600,6 +880,42 @@ def interactive_local_setup() -> Callable[[Workload], ComparisonRow]:
             "own",
             hardware_cost=hardware_cost,
             lifetime_years=lifetime_years,
+            power_watts=power_watts,
+            electricity_rate_per_kwh=electricity_rate,
+        )
+    elif mode == "existing":
+        gpu_draw = None
+        if gpu_info:
+            gpu_draw = gpu_info.get("power_draw_w") or gpu_info.get("power_limit_w")
+        gpu_draw_default = gpu_draw if gpu_draw else 300.0
+
+        power_basis = prompt_choice(
+            "Is this PC already on for other reasons, or only powered on to run this?",
+            ["already-on", "only-for-this"],
+            default="already-on",
+        )
+        if power_basis == "already-on":
+            power_watts = prompt_float(
+                "Extra power draw while generating — GPU/CPU load above idle (W)",
+                default=gpu_draw_default,
+                minimum=0,
+            )
+        else:
+            # Rough allowance for the rest of the system (CPU, RAM, storage,
+            # motherboard) beyond just the GPU, since the whole machine's
+            # power is attributable to this use if it wouldn't otherwise be on.
+            power_watts = prompt_float(
+                "Total system power draw while running — GPU plus the rest of the PC (W)",
+                default=gpu_draw_default + 100.0,
+                minimum=0,
+            )
+        electricity_rate = prompt_float(
+            "Electricity rate (USD/kWh)", default=0.15, minimum=0
+        )
+        return lambda workload: build_local_row(
+            workload,
+            tokens_per_sec,
+            "existing",
             power_watts=power_watts,
             electricity_rate_per_kwh=electricity_rate,
         )
@@ -635,32 +951,40 @@ def run_interactive() -> int:
     note = pricing.get("note", "")
     print(f"Hosted pricing as of {as_of}. {note}\n")
 
-    workload = interactive_workload()
+    scenarios = interactive_workload()
     local_row_builder = interactive_local_setup()
     selected = interactive_provider_selection(pricing)
 
-    rows = [local_row_builder(workload)]
-    rows.extend(build_hosted_rows(workload, pricing, selected))
+    scenario_rows = {}
+    for key, label, workload in scenarios:
+        rows = [local_row_builder(workload)]
+        rows.extend(build_hosted_rows(workload, pricing, selected))
+        scenario_rows[key] = (label, workload, rows)
 
-    print("\n== Results ==")
-    print(
-        f"Workload: {workload.requests_per_day:.0f} requests/day, "
-        f"{workload.monthly_total_tokens:,.0f} total tokens/month"
-    )
-    print()
-    print(render_table(rows))
+        print(f"\n== Results: {label} ==")
+        print(
+            f"Workload: {workload.requests_per_day:.0f} requests/day, "
+            f"{workload.monthly_total_tokens:,.0f} total tokens/month"
+        )
+        print()
+        print(render_table(rows))
 
     if prompt_yes_no("\nExport results to a file?", default=False):
         fmt = prompt_choice("Format", ["csv", "json"], default="csv")
-        out_path = Path(
-            input(f"Output path [cost_comparison.{fmt}]: ").strip()
-            or f"cost_comparison.{fmt}"
-        )
-        if fmt == "csv":
-            export_csv(rows, out_path)
-        else:
-            export_json(rows, out_path)
-        print(f"Wrote {out_path}")
+        multiple = len(scenario_rows) > 1
+        for key, (label, _workload, rows) in scenario_rows.items():
+            default_name = (
+                f"cost_comparison_{key}.{fmt}" if multiple else f"cost_comparison.{fmt}"
+            )
+            out_path = Path(
+                input(f"Output path for '{label}' [{default_name}]: ").strip()
+                or default_name
+            )
+            if fmt == "csv":
+                export_csv(rows, out_path)
+            else:
+                export_json(rows, out_path)
+            print(f"Wrote {out_path}")
 
     return 0
 
@@ -668,15 +992,6 @@ def run_interactive() -> int:
 # --------------------------------------------------------------------------
 # Non-interactive entry point (for scripting/CI/testing)
 # --------------------------------------------------------------------------
-
-
-class ConfigError(ValueError):
-    """Raised for a malformed --non-interactive config, with a clear message.
-
-    Deliberately distinct from a bare ``KeyError``/``TypeError`` traceback:
-    this is user-facing config, so a missing or misspelled field should say
-    exactly what's missing rather than dumping a Python stack trace.
-    """
 
 
 def _require_keys(section: dict, required: list, context: str) -> None:
@@ -687,20 +1002,96 @@ def _require_keys(section: dict, required: list, context: str) -> None:
         )
 
 
+def _resolve_workload_scenarios(config: dict) -> list:
+    """Resolve the config's workload section to a list of scenarios.
+
+    Exactly one of three shapes is accepted:
+      * ``"workload"``: an explicit ``{requests_per_day, avg_input_tokens,
+        avg_output_tokens}`` dict — the original, fully-custom shape.
+      * ``"workload_preset"``: a single preset key (see ``WORKLOAD_PRESETS``).
+      * ``"workload_presets"``: a list of preset keys, compared side by side.
+
+    Returns a list of ``(key, label, Workload)`` tuples, mirroring
+    ``interactive_workload``'s return shape so both paths share the same
+    downstream printing/export logic.
+    """
+    provided = [
+        k for k in ("workload", "workload_preset", "workload_presets") if k in config
+    ]
+    if not provided:
+        raise ConfigError(
+            "top-level config must include one of: workload, workload_preset, "
+            "workload_presets"
+        )
+    if len(provided) > 1:
+        raise ConfigError(
+            f"top-level config must include only one of: workload, workload_preset, "
+            f"workload_presets — got {', '.join(provided)}"
+        )
+
+    if "workload" in config:
+        _require_keys(
+            config["workload"],
+            ["requests_per_day", "avg_input_tokens", "avg_output_tokens"],
+            "workload",
+        )
+        for field_name in ("requests_per_day", "avg_input_tokens", "avg_output_tokens"):
+            value = config["workload"][field_name]
+            if not isinstance(value, (int, float)) or value < 0:
+                raise ConfigError(
+                    f"workload.{field_name} must be a non-negative number, got {value!r}"
+                )
+        try:
+            workload = Workload(**config["workload"])
+        except TypeError as exc:
+            raise ConfigError(
+                f"workload config has an unexpected field: {exc}"
+            ) from exc
+        if workload.monthly_total_tokens <= 0:
+            raise ConfigError(
+                "workload produces zero total tokens/month — set requests_per_day and "
+                "at least one of avg_input_tokens/avg_output_tokens above zero"
+            )
+        return [("custom", "Custom", workload)]
+
+    keys = (
+        [config["workload_preset"]]
+        if "workload_preset" in config
+        else config["workload_presets"]
+    )
+    return [(p.key, p.label, p.to_workload()) for p in (get_preset(k) for k in keys)]
+
+
 def run_non_interactive(
     config_path: Path, export_fmt: Optional[str], export_path: Optional[Path]
 ) -> int:
     """Run the comparison from a JSON config instead of interactive prompts.
 
-    Config shape:
+    Config shape (most common case — hardware you already own):
         {
           "workload": {"requests_per_day": 1000, "avg_input_tokens": 500, "avg_output_tokens": 300},
-          "local": {"mode": "own", "hardware_cost": 1600, "lifetime_years": 3,
-                     "power_watts": 450, "electricity_rate_per_kwh": 0.15,
-                     "tokens_per_sec": 40},
+          "local": {"mode": "existing", "power_watts": 450,
+                     "electricity_rate_per_kwh": 0.15, "tokens_per_sec": 40},
           "pricing_file": "pricing.json",
           "selected_models": ["claude/opus-5", "deepseek/deepseek-v3"]
         }
+
+    ``local.mode`` is one of:
+      * ``"existing"`` — you already own the PC/GPU; only electricity counts
+        (``power_watts``, ``electricity_rate_per_kwh``). Use the GPU/CPU's
+        *extra* draw above idle if the machine is already on for other
+        reasons, or the *whole system's* draw if it's only powered on to run
+        this.
+      * ``"own"`` — you're deciding whether to buy hardware specifically for
+        this; adds ``hardware_cost`` and ``lifetime_years`` to amortize the
+        purchase alongside electricity.
+      * ``"rent"`` — a rented cloud GPU billed hourly (``hourly_rate``).
+
+    In place of ``"workload"``, use ``"workload_preset": "<key>"`` for a
+    single named scenario, or ``"workload_presets": ["<key>", ...]`` to
+    compare several at once — see ``WORKLOAD_PRESETS`` for valid keys.
+    Exactly one of ``workload`` / ``workload_preset`` / ``workload_presets``
+    must be given.
 
     ``pricing_file``, if relative, is resolved against ``config_path``'s
     directory (not the process's working directory) so the example config
@@ -709,27 +1100,8 @@ def run_non_interactive(
     with open(config_path, "r", encoding="utf-8") as f:
         config = json.load(f)
 
-    _require_keys(config, ["workload", "local"], "top-level")
-    _require_keys(
-        config["workload"],
-        ["requests_per_day", "avg_input_tokens", "avg_output_tokens"],
-        "workload",
-    )
-    for field_name in ("requests_per_day", "avg_input_tokens", "avg_output_tokens"):
-        value = config["workload"][field_name]
-        if not isinstance(value, (int, float)) or value < 0:
-            raise ConfigError(
-                f"workload.{field_name} must be a non-negative number, got {value!r}"
-            )
-    try:
-        workload = Workload(**config["workload"])
-    except TypeError as exc:
-        raise ConfigError(f"workload config has an unexpected field: {exc}") from exc
-    if workload.monthly_total_tokens <= 0:
-        raise ConfigError(
-            "workload produces zero total tokens/month — set requests_per_day and at "
-            "least one of avg_input_tokens/avg_output_tokens above zero"
-        )
+    _require_keys(config, ["local"], "top-level")
+    scenarios = _resolve_workload_scenarios(config)
 
     pricing_path = Path(config.get("pricing_file", DEFAULT_PRICING_PATH))
     if not pricing_path.is_absolute():
@@ -759,35 +1131,67 @@ def run_non_interactive(
             ],
             "local (mode=own)",
         )
-        local_row = build_local_row(
-            workload,
-            local_cfg["tokens_per_sec"],
-            "own",
-            hardware_cost=local_cfg["hardware_cost"],
-            lifetime_years=local_cfg["lifetime_years"],
-            power_watts=local_cfg["power_watts"],
-            electricity_rate_per_kwh=local_cfg["electricity_rate_per_kwh"],
+
+        def build_local(workload: Workload) -> ComparisonRow:
+            return build_local_row(
+                workload,
+                local_cfg["tokens_per_sec"],
+                "own",
+                hardware_cost=local_cfg["hardware_cost"],
+                lifetime_years=local_cfg["lifetime_years"],
+                power_watts=local_cfg["power_watts"],
+                electricity_rate_per_kwh=local_cfg["electricity_rate_per_kwh"],
+            )
+
+    elif mode == "existing":
+        _require_keys(
+            local_cfg,
+            ["power_watts", "electricity_rate_per_kwh"],
+            "local (mode=existing)",
         )
+
+        def build_local(workload: Workload) -> ComparisonRow:
+            return build_local_row(
+                workload,
+                local_cfg["tokens_per_sec"],
+                "existing",
+                power_watts=local_cfg["power_watts"],
+                electricity_rate_per_kwh=local_cfg["electricity_rate_per_kwh"],
+            )
+
     elif mode == "rent":
         _require_keys(local_cfg, ["hourly_rate"], "local (mode=rent)")
-        local_row = build_local_row(
-            workload,
-            local_cfg["tokens_per_sec"],
-            "rent",
-            hourly_rate=local_cfg["hourly_rate"],
-        )
+
+        def build_local(workload: Workload) -> ComparisonRow:
+            return build_local_row(
+                workload,
+                local_cfg["tokens_per_sec"],
+                "rent",
+                hourly_rate=local_cfg["hourly_rate"],
+            )
+
     else:
-        raise ConfigError(f"local.mode must be 'own' or 'rent', got {mode!r}")
+        raise ConfigError(
+            f"local.mode must be 'own', 'existing', or 'rent', got {mode!r}"
+        )
 
-    rows = [local_row] + build_hosted_rows(workload, pricing, selected)
-    print(render_table(rows))
+    multiple = len(scenarios) > 1
+    for key, label, workload in scenarios:
+        rows = [build_local(workload)] + build_hosted_rows(workload, pricing, selected)
+        print(f"\n== {label} ==")
+        print(render_table(rows))
 
-    if export_fmt and export_path:
-        if export_fmt == "csv":
-            export_csv(rows, export_path)
-        else:
-            export_json(rows, export_path)
-        print(f"\nWrote {export_path}")
+        if export_fmt and export_path:
+            scenario_path = (
+                export_path.with_name(f"{export_path.stem}_{key}{export_path.suffix}")
+                if multiple
+                else export_path
+            )
+            if export_fmt == "csv":
+                export_csv(rows, scenario_path)
+            else:
+                export_json(rows, scenario_path)
+            print(f"Wrote {scenario_path}")
     return 0
 
 

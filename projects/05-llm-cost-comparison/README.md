@@ -22,7 +22,9 @@ runs what checks it can automatically, and prints a side-by-side table.
     Windows) to auto-detect GPU name/VRAM/power draw.
   - A running local model server (e.g. [Ollama](https://ollama.com) or an
     OpenAI-compatible endpoint like LM Studio) if you want the script to
-    measure your actual tokens/sec instead of you estimating it.
+    measure your actual tokens/sec instead of you estimating it, and to list
+    which model is currently loaded (Ollama) or available (OpenAI-compatible)
+    so you don't have to type its name from memory.
 
 Both checks are optional and degrade gracefully to manual input if
 unavailable — the script works fine with neither.
@@ -36,14 +38,18 @@ python llm_cost_comparison.py
 ```
 
 Walks through:
-1. **Workload** — requests/day and average input/output tokens per request.
-2. **Local setup** — optional GPU auto-detection, optional throughput
-   benchmark against a local model server, then hardware cost/lifetime/power
-   (owned) or hourly rate (rented cloud GPU).
+1. **Workload** — pick a named traffic scenario ("casual personal use",
+   "autonomous coding agent", etc.), compare all of them at once, or enter
+   your own numbers if none fit. No need to guess requests/day cold.
+2. **Local setup** — optional GPU auto-detection (which also prefills a
+   realistic hardware price/power for that card), optional throughput
+   benchmark against a local model server (which lists what's actually
+   loaded so you don't have to type a model name blind), then a choice of
+   hardware cost basis (see below).
 3. **Hosted providers** — pick which models from `pricing.json` to compare
    against, or compare against all of them.
-4. **Results** — a table sorted cheapest-first, with an option to export to
-   CSV or JSON.
+4. **Results** — one table per scenario, sorted cheapest-first, with an
+   option to export each to CSV or JSON.
 
 ### Non-interactive (scripting / CI)
 
@@ -52,17 +58,49 @@ python llm_cost_comparison.py --non-interactive --config example_config.json \
     --export json --export-path out.json
 ```
 
-See `example_config.json` for the config shape.
+See `example_config.json` (workload presets, hardware you already own) and
+`example_config_buying_hardware.json` (explicit workload, buying new
+hardware) for the config shapes.
+
+## Traffic scenarios (workload presets)
+
+Guessing "requests per day" and "average input tokens per request" cold is a
+bad starting point if you've never measured your own usage. Instead of
+asking for those numbers directly, the script offers named scenarios in
+plain language:
+
+| Preset key        | What it represents                                                             |
+| ------------------ | ------------------------------------------------------------------------------ |
+| `casual`            | A handful of questions a day, like using it instead of a search engine.       |
+| `daily_assistant`   | Used on and off throughout the workday for drafting, research, quick coding.  |
+| `coding_agent`      | An autonomous agent that reads files and runs commands on its own — large input tokens per turn since it re-sends file/context content. |
+| `team_tool`         | A shared assistant used by a small team (5-20 people) all day.               |
+| `production_app`    | A live app serving many users' requests around the clock.                    |
+
+Pick one, compare all of them side by side, or fall back to entering your
+own numbers. In a non-interactive config, use `"workload_preset": "<key>"`
+for one scenario or `"workload_presets": ["<key>", ...]` to compare several
+— see `WORKLOAD_PRESETS` in `llm_cost_comparison.py` for the exact
+requests/day and token counts behind each one.
 
 ## How the numbers are computed
 
 - **Hosted providers**: `monthly cost = (monthly input tokens / 1M × input rate) + (monthly output tokens / 1M × output rate)`, using rates from `pricing.json`.
-- **Owned local hardware**: split into a *fixed* monthly cost (hardware price
-  amortized over its expected lifetime — it ages whether it's busy or not)
-  plus a *variable* cost (power draw × electricity rate × hours actually
-  spent generating the workload's tokens).
-- **Rented cloud GPU**: `hourly rate × hours needed for the workload` — no
-  amortization, since you're not buying the hardware.
+- **Local — hardware you already own** (`existing` mode, the common case):
+  **electricity only**, no amortization — the machine's cost is sunk
+  regardless of whether you run an LLM on it. You pick the power-draw basis:
+  - *Machine already on for other reasons* → the **extra** power the
+    GPU/CPU draw under load, above idle.
+  - *Machine only powered on to run this* → the **whole system's** draw
+    while running, since the entire session's electricity is attributable
+    to this use.
+- **Local — buying new hardware** (`own` mode): split into a *fixed* monthly
+  cost (hardware price amortized over its expected lifetime — it ages
+  whether it's busy or not) plus the same *variable* electricity cost as
+  above. GPU auto-detection prefills a realistic price/power pair for common
+  cards instead of one generic guess.
+- **Local — rented cloud GPU** (`rent` mode): `hourly rate × hours needed for
+  the workload` — no amortization, since you're not buying the hardware.
 - All options are also expressed as a blended **$ per 1 million tokens**
   (input + output combined) so local and hosted costs are directly
   comparable regardless of your workload's input/output mix.
@@ -103,11 +141,16 @@ pip install pytest
 pytest test_llm_cost_comparison.py -v
 ```
 
-Tests cover the pure cost-calculation functions, pricing-file loading,
-`nvidia-smi` output parsing (via a mocked subprocess runner — no GPU needed
-to run the tests), table rendering, CSV/JSON export, and an end-to-end
-non-interactive run. The interactive `input()` prompt flow is a thin wrapper
-around these tested functions and isn't itself exercised by the test suite.
+Tests cover the pure cost-calculation functions (including the "existing
+hardware" electricity-only mode), workload presets, pricing-file loading,
+`nvidia-smi` output parsing and GPU price/power lookup (via a mocked
+subprocess runner — no GPU needed to run the tests), local model discovery
+(via mocked HTTP responses — no Ollama/LM Studio needed), table rendering,
+CSV/JSON export, and end-to-end non-interactive runs (including multiple
+preset scenarios in one run). The interactive `input()` prompt flow — the
+workload/hardware-mode menus included — is exercised with a monkeypatched
+`input()` where it's simple to script (e.g. `interactive_workload`'s menu
+selection); the rest is a thin wrapper around these tested functions.
 
 ## Windows notes
 
