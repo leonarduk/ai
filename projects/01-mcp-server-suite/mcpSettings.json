@@ -48,6 +48,13 @@
         "C:\\Users\\steph\\workspace\\GitHub\\ai\\tools\\web_mcp_server\\server.py"
       ],
       "description": "Server for web search (Brave Search API) and fetching web page content."
+    },
+    "prize_draw": {
+      "command": "C:\\Users\\steph\\workspace\\GitHub\\ai\\.venv\\Scripts\\python.exe",
+      "args": [
+        "C:\\Users\\steph\\workspace\\GitHub\\ai\\tools\\prize-draw-mcp-server\\server.py"
+      ],
+      "description": "Server for prize draw discovery (search/parse) and entry mechanics (submit/log), with no LLM logic of its own."
     }
   }
 }
