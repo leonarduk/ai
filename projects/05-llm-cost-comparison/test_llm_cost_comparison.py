@@ -193,6 +193,25 @@ def test_build_hosted_rows_all_and_filtered(tmp_path):
     assert haiku_cost < opus_cost
 
 
+def test_build_hosted_rows_raises_config_error_on_malformed_pricing():
+    pricing = {
+        "providers": {
+            "claude": {
+                "models": {
+                    "opus-5": {
+                        "display_name": "Claude Opus 5",
+                        "input_per_million": "not-a-number",
+                        "output_per_million": 25.0,
+                    }
+                }
+            }
+        }
+    }
+    w = m.Workload(1000, 500, 300)
+    with pytest.raises(m.ConfigError, match="claude/opus-5"):
+        m.build_hosted_rows(w, pricing)
+
+
 # --------------------------------------------------------------------------
 # Real pricing.json shipped alongside the script
 # --------------------------------------------------------------------------
@@ -502,6 +521,78 @@ def test_benchmark_openai_compatible_rejects_non_http_url():
         m.benchmark_openai_compatible("ftp://example.com", "some-model")
 
 
+def test_measure_gpu_power_during_returns_peak_reading(monkeypatch):
+    readings = iter(
+        [
+            {"name": "RTX 4090", "power_draw_w": 40.0},
+            {"name": "RTX 4090", "power_draw_w": 380.0},
+        ]
+    )
+    monkeypatch.setattr(
+        m,
+        "detect_nvidia_gpu",
+        lambda runner=None: next(readings, {"name": "RTX 4090", "power_draw_w": 380.0}),
+    )
+    result, peak = m.measure_gpu_power_during(
+        lambda: "done", runner=lambda *a, **k: None, poll_interval=0.01
+    )
+    assert result == "done"
+    assert peak is not None and peak >= 40.0
+
+
+def test_measure_gpu_power_during_returns_none_peak_without_gpu(monkeypatch):
+    monkeypatch.setattr(m, "detect_nvidia_gpu", lambda runner=None: None)
+    result, peak = m.measure_gpu_power_during(
+        lambda: 42, runner=lambda *a, **k: None, poll_interval=0.01
+    )
+    assert result == 42
+    assert peak is None
+
+
+def test_fetch_octopus_agile_rate_parses_current_slot(monkeypatch):
+    now = m.datetime.now(m.timezone.utc)
+    valid_from = (now.replace(microsecond=0)).isoformat().replace("+00:00", "Z")
+    products_body = json.dumps({"results": [{"code": "AGILE-24-10-01"}]}).encode(
+        "utf-8"
+    )
+    rates_body = json.dumps(
+        {
+            "results": [
+                {
+                    "valid_from": valid_from,
+                    "valid_to": None,
+                    "value_inc_vat": 24.83,
+                }
+            ]
+        }
+    ).encode("utf-8")
+
+    def fake_urlopen(url, timeout=None):
+        if "standard-unit-rates" in url:
+            return _FakeHTTPResponse(rates_body)
+        return _FakeHTTPResponse(products_body)
+
+    monkeypatch.setattr(m.urllib.request, "urlopen", fake_urlopen)
+    rate = m.fetch_octopus_agile_rate("C")
+    assert rate == pytest.approx(0.2483)
+
+
+def test_fetch_octopus_agile_rate_returns_none_on_failure(monkeypatch):
+    def fake_urlopen(url, timeout=None):
+        raise OSError("network down")
+
+    monkeypatch.setattr(m.urllib.request, "urlopen", fake_urlopen)
+    assert m.fetch_octopus_agile_rate("C") is None
+
+
+def test_fetch_octopus_agile_rate_returns_none_when_no_agile_product(monkeypatch):
+    def fake_urlopen(url, timeout=None):
+        return _FakeHTTPResponse(json.dumps({"results": []}).encode("utf-8"))
+
+    monkeypatch.setattr(m.urllib.request, "urlopen", fake_urlopen)
+    assert m.fetch_octopus_agile_rate("C") is None
+
+
 # --------------------------------------------------------------------------
 # prompt_float minimum enforcement
 # --------------------------------------------------------------------------
@@ -517,9 +608,8 @@ def test_prompt_float_rejects_below_minimum(monkeypatch, capsys):
 
 
 def test_prompt_float_accepts_default_without_minimum_check(monkeypatch):
-    # An empty answer takes the default even if a minimum is set on the
-    # default itself is trusted (defaults are author-supplied, not
-    # attacker/user-supplied).
+    # An empty answer takes the default even when a minimum is set: defaults
+    # are author-supplied and therefore trusted, so they skip the check.
     monkeypatch.setattr("builtins.input", lambda _: "")
     assert m.prompt_float("x", default=5.0, minimum=1.0) == 5.0
 
@@ -727,6 +817,44 @@ def test_run_non_interactive_missing_pricing_file_raises_config_error(tmp_path: 
     config_path.write_text(json.dumps(config), encoding="utf-8")
 
     with pytest.raises(m.ConfigError, match="pricing file not found"):
+        m.run_non_interactive(config_path, export_fmt=None, export_path=None)
+
+
+def test_run_non_interactive_missing_config_file_raises_config_error(tmp_path: Path):
+    config_path = tmp_path / "does_not_exist.json"
+    with pytest.raises(m.ConfigError, match="config file not found"):
+        m.run_non_interactive(config_path, export_fmt=None, export_path=None)
+
+
+def test_run_non_interactive_invalid_json_raises_config_error(tmp_path: Path):
+    config_path = tmp_path / "config.json"
+    config_path.write_text("{not valid json", encoding="utf-8")
+    with pytest.raises(m.ConfigError, match="not valid JSON"):
+        m.run_non_interactive(config_path, export_fmt=None, export_path=None)
+
+
+def test_run_non_interactive_own_mode_rejects_non_numeric_field(tmp_path: Path):
+    pricing_path = tmp_path / "pricing.json"
+    _write_pricing(pricing_path)
+    config_path = tmp_path / "config.json"
+    config = {
+        "workload": {
+            "requests_per_day": 1000,
+            "avg_input_tokens": 500,
+            "avg_output_tokens": 300,
+        },
+        "local": {
+            "mode": "own",
+            "tokens_per_sec": 40,
+            "hardware_cost": "1600",
+            "lifetime_years": 3,
+            "power_watts": 450,
+            "electricity_rate_per_kwh": 0.15,
+        },
+        "pricing_file": str(pricing_path),
+    }
+    config_path.write_text(json.dumps(config), encoding="utf-8")
+    with pytest.raises(m.ConfigError, match="hardware_cost"):
         m.run_non_interactive(config_path, export_fmt=None, export_path=None)
 
 
@@ -938,6 +1066,19 @@ def test_build_local_row_existing_hardware():
         electricity_rate_per_kwh=0.15,
     )
     assert row.monthly_cost < buying_row.monthly_cost
+
+
+def test_build_local_row_existing_hardware_accepts_name_override():
+    w = m.Workload(requests_per_day=100, avg_input_tokens=500, avg_output_tokens=500)
+    row = m.build_local_row(
+        w,
+        tokens_per_sec=100,
+        mode="existing",
+        power_watts=450,
+        electricity_rate_per_kwh=0.15,
+        name="Local (custom label)",
+    )
+    assert row.name == "Local (custom label)"
 
 
 def test_run_non_interactive_existing_mode(tmp_path: Path, capsys):

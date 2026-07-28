@@ -44,7 +44,9 @@ Walks through:
 2. **Local setup** — optional GPU auto-detection (which also prefills a
    realistic hardware price/power for that card), optional throughput
    benchmark against a local model server (which lists what's actually
-   loaded so you don't have to type a model name blind), then a choice of
+   loaded so you don't have to type a model name blind, and — while it
+   runs — measures the GPU's power draw under load so the "electricity
+   only" mode below doesn't need a guessed wattage), then a choice of
    hardware cost basis (see below).
 3. **Hosted providers** — pick which models from `pricing.json` to compare
    against, or compare against all of them.
@@ -86,14 +88,26 @@ requests/day and token counts behind each one.
 ## How the numbers are computed
 
 - **Hosted providers**: `monthly cost = (monthly input tokens / 1M × input rate) + (monthly output tokens / 1M × output rate)`, using rates from `pricing.json`.
-- **Local — hardware you already own** (`existing` mode, the common case):
-  **electricity only**, no amortization — the machine's cost is sunk
-  regardless of whether you run an LLM on it. You pick the power-draw basis:
+- **Local — hardware you already own** (`existing` mode, the common case,
+  interactive only): **electricity only**, no amortization — the machine's
+  cost is sunk regardless of whether you run an LLM on it. Since which power
+  basis applies depends on why the machine happens to be on, the interactive
+  flow computes and shows **both** as separate rows rather than asking you
+  to guess up front:
   - *Machine already on for other reasons* → the **extra** power the
-    GPU/CPU draw under load, above idle.
+    GPU/CPU draw under load, above idle. If a benchmark ran, this is
+    measured automatically (peak power during the benchmark minus the idle
+    reading taken at GPU detection) instead of guessed.
   - *Machine only powered on to run this* → the **whole system's** draw
     while running, since the entire session's electricity is attributable
-    to this use.
+    to this use (measured extra draw plus a fixed allowance for the rest of
+    the PC).
+  - Electricity rate can be entered in USD/kWh, or in GBP/kWh — including a
+    live lookup of the current UK Octopus Agile unit rate — converted to
+    USD via an exchange rate you supply, so it's comparable against the
+    USD-denominated hosted pricing.
+  - The non-interactive config still takes a single `power_watts` — pick
+    whichever basis applies to your situation.
 - **Local — buying new hardware** (`own` mode): split into a *fixed* monthly
   cost (hardware price amortized over its expected lifetime — it ages
   whether it's busy or not) plus the same *variable* electricity cost as

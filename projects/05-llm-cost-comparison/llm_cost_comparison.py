@@ -30,10 +30,12 @@ import csv
 import json
 import subprocess
 import sys
+import threading
 import time
 import urllib.error
 import urllib.request
 from dataclasses import dataclass
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Callable, Optional
 
@@ -302,6 +304,7 @@ def build_local_row(
     power_watts: float = 0.0,
     electricity_rate_per_kwh: float = 0.0,
     hourly_rate: float = 0.0,
+    name: Optional[str] = None,
 ) -> ComparisonRow:
     hours_needed = hours_needed_for_workload(
         workload.monthly_total_tokens, tokens_per_sec
@@ -314,12 +317,12 @@ def build_local_row(
             electricity_rate_per_kwh,
             hours_needed,
         )
-        name = "Local (buying new hardware)"
+        name = name or "Local (buying new hardware)"
     elif mode == "existing":
         monthly_cost = local_monthly_cost_existing_hardware(
             power_watts, electricity_rate_per_kwh, hours_needed
         )
-        name = "Local (electricity only — hardware already owned)"
+        name = name or "Local (electricity only — hardware already owned)"
     elif mode == "rent":
         monthly_cost = local_monthly_cost_rented(hourly_rate, hours_needed)
         name = "Local (rented cloud GPU)"
@@ -343,6 +346,11 @@ def build_hosted_rows(
         full_key = f"{provider_key}/{model_key}"
         if selected is not None and full_key not in selected:
             continue
+        for field in ("input_per_million", "output_per_million"):
+            if not isinstance(model_info.get(field), (int, float)):
+                raise ConfigError(
+                    f"pricing model {full_key!r} is missing a numeric {field}"
+                )
         monthly_cost = hosted_monthly_cost(
             workload, model_info["input_per_million"], model_info["output_per_million"]
         )
@@ -467,6 +475,84 @@ def detect_nvidia_gpu(runner: Callable = subprocess.run) -> Optional[dict]:
         "power_draw_w": _safe_float(power_draw),
         "power_limit_w": _safe_float(power_limit),
     }
+
+
+def measure_gpu_power_during(
+    func: Callable, runner: Callable = subprocess.run, poll_interval: float = 0.5
+) -> tuple:
+    """Run ``func()`` while polling GPU power draw; return ``(result, peak_watts)``.
+
+    ``peak_watts`` is the highest ``power.draw`` reading seen while ``func``
+    was running, or None if no reading was available (no GPU, or ``func``
+    finished before the first poll). This lets the benchmark step measure a
+    real "under load" wattage instead of asking the user to guess it.
+    """
+    readings = []
+    stop = threading.Event()
+
+    def poll() -> None:
+        while not stop.is_set():
+            info = detect_nvidia_gpu(runner)
+            if info and info.get("power_draw_w") is not None:
+                readings.append(info["power_draw_w"])
+            stop.wait(poll_interval)
+
+    thread = threading.Thread(target=poll, daemon=True)
+    thread.start()
+    try:
+        result = func()
+    finally:
+        stop.set()
+        thread.join(timeout=poll_interval * 4)
+    return result, (max(readings) if readings else None)
+
+
+OCTOPUS_PRODUCTS_URL = "https://api.octopus.energy/v1/products/"
+
+
+def fetch_octopus_agile_rate(
+    region_letter: str = "C", timeout: float = 5.0
+) -> Optional[float]:
+    """Best-effort fetch of the current Octopus Agile unit rate (GBP/kWh).
+
+    Octopus Agile product codes roll over every few months, so this looks
+    the current one up rather than hardcoding it, then finds the
+    half-hourly rate slot covering right now. Returns None on any failure
+    (network, no matching product, parsing) so callers fall back to manual
+    entry — this is a convenience lookup, not a requirement.
+    """
+    try:
+        with urllib.request.urlopen(OCTOPUS_PRODUCTS_URL, timeout=timeout) as resp:
+            products = json.loads(resp.read()).get("results", [])
+        agile_codes = [
+            p["code"] for p in products if "AGILE" in p.get("code", "").upper()
+        ]
+        if not agile_codes:
+            return None
+        product_code = agile_codes[0]
+        tariff_code = f"E-1R-{product_code}-{region_letter}"
+        rates_url = (
+            f"https://api.octopus.energy/v1/products/{product_code}/"
+            f"electricity-tariffs/{tariff_code}/standard-unit-rates/"
+        )
+        with urllib.request.urlopen(rates_url, timeout=timeout) as resp:
+            rates = json.loads(resp.read()).get("results", [])
+        now = datetime.now(timezone.utc)
+        for rate in rates:
+            valid_from = datetime.fromisoformat(
+                rate["valid_from"].replace("Z", "+00:00")
+            )
+            valid_to_raw = rate.get("valid_to")
+            valid_to = (
+                datetime.fromisoformat(valid_to_raw.replace("Z", "+00:00"))
+                if valid_to_raw
+                else None
+            )
+            if valid_from <= now and (valid_to is None or now < valid_to):
+                return rate["value_inc_vat"] / 100.0
+        return None
+    except Exception:  # noqa: BLE001 - best-effort, any failure just falls back
+        return None
 
 
 # Rough street price (USD) and typical power draw under load (W) for common
@@ -782,7 +868,7 @@ def interactive_workload() -> list:
     return [("custom", "Custom", _prompt_custom_workload())]
 
 
-def interactive_local_setup() -> Callable[[Workload], ComparisonRow]:
+def interactive_local_setup() -> Callable[[Workload], list]:
     print("\n== Local setup ==")
     gpu_info = None
     if prompt_yes_no(
@@ -797,9 +883,10 @@ def interactive_local_setup() -> Callable[[Workload], ComparisonRow]:
             )
 
     tokens_per_sec = None
+    measured_load_power_w = None
     if prompt_yes_no(
         "Attempt to benchmark a running local model endpoint (Ollama or OpenAI-compatible)?",
-        default=False,
+        default=True,
     ):
         backend = prompt_choice("Backend", ["ollama", "openai"], default="ollama")
         base_url = (
@@ -818,11 +905,16 @@ def interactive_local_setup() -> Callable[[Workload], ComparisonRow]:
             )
         else:
             model = input(f"{prompt_label}: ").strip()
+        measured_load_power_w = None
         try:
             if backend == "ollama":
-                tokens_per_sec = benchmark_ollama(base_url, model)
+                tokens_per_sec, measured_load_power_w = measure_gpu_power_during(
+                    lambda: benchmark_ollama(base_url, model)
+                )
             else:
-                tokens_per_sec = benchmark_openai_compatible(base_url, model)
+                tokens_per_sec, measured_load_power_w = measure_gpu_power_during(
+                    lambda: benchmark_openai_compatible(base_url, model)
+                )
             print(f"  Measured throughput: {tokens_per_sec:.1f} tokens/sec")
         except (
             Exception
@@ -874,58 +966,115 @@ def interactive_local_setup() -> Callable[[Workload], ComparisonRow]:
         electricity_rate = prompt_float(
             "Electricity rate (USD/kWh)", default=0.15, minimum=0
         )
-        return lambda workload: build_local_row(
-            workload,
-            tokens_per_sec,
-            "own",
-            hardware_cost=hardware_cost,
-            lifetime_years=lifetime_years,
-            power_watts=power_watts,
-            electricity_rate_per_kwh=electricity_rate,
-        )
+        return lambda workload: [
+            build_local_row(
+                workload,
+                tokens_per_sec,
+                "own",
+                hardware_cost=hardware_cost,
+                lifetime_years=lifetime_years,
+                power_watts=power_watts,
+                electricity_rate_per_kwh=electricity_rate,
+            )
+        ]
     elif mode == "existing":
-        gpu_draw = None
-        if gpu_info:
-            gpu_draw = gpu_info.get("power_draw_w") or gpu_info.get("power_limit_w")
-        gpu_draw_default = gpu_draw if gpu_draw else 300.0
+        idle_draw = gpu_info.get("power_draw_w") if gpu_info else None
+        extra_default = None
+        if measured_load_power_w is not None and idle_draw is not None:
+            extra_default = max(measured_load_power_w - idle_draw, 0.0)
+            print(
+                f"  Measured extra draw while generating (load {measured_load_power_w:.0f} W "
+                f"minus idle {idle_draw:.0f} W): {extra_default:.0f} W"
+            )
+        if extra_default is None:
+            gpu_draw = None
+            if gpu_info:
+                gpu_draw = gpu_info.get("power_draw_w") or gpu_info.get("power_limit_w")
+            extra_default = gpu_draw if gpu_draw else 300.0
 
-        power_basis = prompt_choice(
-            "Is this PC already on for other reasons, or only powered on to run this?",
-            ["already-on", "only-for-this"],
-            default="already-on",
+        print(
+            "\n  Both cost bases are shown below, since which applies depends on why the\n"
+            "  machine is on — you don't have to pick one up front.\n"
         )
-        if power_basis == "already-on":
-            power_watts = prompt_float(
-                "Extra power draw while generating — GPU/CPU load above idle (W)",
-                default=gpu_draw_default,
+        power_watts_extra = prompt_float(
+            "Extra power draw while generating — GPU/CPU load above idle (W), "
+            "for when the machine is already on for other reasons",
+            default=extra_default,
+            minimum=0,
+        )
+        # Rough allowance for the rest of the system (CPU, RAM, storage,
+        # motherboard) beyond just the GPU, for when the whole machine's
+        # power is attributable to this use because it wouldn't otherwise be on.
+        power_watts_total = prompt_float(
+            "Total system power draw while running — GPU plus the rest of the PC "
+            "(W), for when it's only powered on to run this",
+            default=power_watts_extra + 100.0,
+            minimum=0,
+        )
+
+        electricity_rate = None
+        if prompt_yes_no("Do you pay for electricity in GBP (e.g. UK)?", default=False):
+            gbp_rate = None
+            if prompt_yes_no(
+                "Look up your current unit rate live from Octopus Agile?", default=True
+            ):
+                region = (
+                    input("Octopus Energy region letter (A-P; C = London) [C]: ")
+                    .strip()
+                    .upper()
+                    or "C"
+                )
+                gbp_rate = fetch_octopus_agile_rate(region)
+                if gbp_rate is not None:
+                    print(f"  Current Octopus Agile unit rate: £{gbp_rate:.4f}/kWh")
+                else:
+                    print(
+                        "  Could not fetch a live Octopus Agile rate — enter manually."
+                    )
+            if gbp_rate is None:
+                gbp_rate = prompt_float(
+                    "Electricity rate (GBP/kWh)", default=0.2483, minimum=0
+                )
+            usd_per_gbp = prompt_float(
+                "GBP→USD exchange rate (so this can be compared against USD hosted "
+                "pricing)",
+                default=1.27,
                 minimum=0,
             )
+            electricity_rate = gbp_rate * usd_per_gbp
         else:
-            # Rough allowance for the rest of the system (CPU, RAM, storage,
-            # motherboard) beyond just the GPU, since the whole machine's
-            # power is attributable to this use if it wouldn't otherwise be on.
-            power_watts = prompt_float(
-                "Total system power draw while running — GPU plus the rest of the PC (W)",
-                default=gpu_draw_default + 100.0,
-                minimum=0,
+            electricity_rate = prompt_float(
+                "Electricity rate (USD/kWh)", default=0.15, minimum=0
             )
-        electricity_rate = prompt_float(
-            "Electricity rate (USD/kWh)", default=0.15, minimum=0
-        )
-        return lambda workload: build_local_row(
-            workload,
-            tokens_per_sec,
-            "existing",
-            power_watts=power_watts,
-            electricity_rate_per_kwh=electricity_rate,
-        )
+
+        def build_existing_rows(workload: Workload) -> list:
+            return [
+                build_local_row(
+                    workload,
+                    tokens_per_sec,
+                    "existing",
+                    power_watts=power_watts_extra,
+                    electricity_rate_per_kwh=electricity_rate,
+                    name="Local (electricity only — machine already on for other reasons)",
+                ),
+                build_local_row(
+                    workload,
+                    tokens_per_sec,
+                    "existing",
+                    power_watts=power_watts_total,
+                    electricity_rate_per_kwh=electricity_rate,
+                    name="Local (electricity only — machine only powered on for this)",
+                ),
+            ]
+
+        return build_existing_rows
     else:
         hourly_rate = prompt_float(
             "Rented GPU hourly rate (USD/hr)", default=2.50, minimum=0
         )
-        return lambda workload: build_local_row(
-            workload, tokens_per_sec, "rent", hourly_rate=hourly_rate
-        )
+        return lambda workload: [
+            build_local_row(workload, tokens_per_sec, "rent", hourly_rate=hourly_rate)
+        ]
 
 
 def interactive_provider_selection(pricing: dict) -> Optional[set]:
@@ -957,7 +1106,7 @@ def run_interactive() -> int:
 
     scenario_rows = {}
     for key, label, workload in scenarios:
-        rows = [local_row_builder(workload)]
+        rows = list(local_row_builder(workload))
         rows.extend(build_hosted_rows(workload, pricing, selected))
         scenario_rows[key] = (label, workload, rows)
 
@@ -1000,6 +1149,28 @@ def _require_keys(section: dict, required: list, context: str) -> None:
         raise ConfigError(
             f"{context} config is missing required field(s): {', '.join(missing)}"
         )
+
+
+def _require_numeric_fields(
+    section: dict, fields: list, context: str, *, allow_zero: bool = True
+) -> None:
+    """Validate each field is a number, raising ``ConfigError`` if not.
+
+    Without this, a stray string (e.g. a quoted ``"450"`` instead of ``450``)
+    in ``hardware_cost``/``power_watts``/``hourly_rate`` etc. would fail with
+    a raw ``TypeError`` deep inside the cost math instead of a clear,
+    field-named error at config-load time.
+    """
+    bound = ">= 0" if allow_zero else "> 0"
+    for field_name in fields:
+        value = section[field_name]
+        ok = isinstance(value, (int, float)) and not isinstance(value, bool)
+        if ok:
+            ok = value >= 0 if allow_zero else value > 0
+        if not ok:
+            raise ConfigError(
+                f"{context}.{field_name} must be a number {bound}, got {value!r}"
+            )
 
 
 def _resolve_workload_scenarios(config: dict) -> list:
@@ -1097,8 +1268,15 @@ def run_non_interactive(
     directory (not the process's working directory) so the example config
     works regardless of where the script is invoked from.
     """
-    with open(config_path, "r", encoding="utf-8") as f:
-        config = json.load(f)
+    try:
+        with open(config_path, "r", encoding="utf-8") as f:
+            config = json.load(f)
+    except FileNotFoundError as exc:
+        raise ConfigError(f"config file not found: {config_path}") from exc
+    except json.JSONDecodeError as exc:
+        raise ConfigError(
+            f"config file {config_path} is not valid JSON: {exc}"
+        ) from exc
 
     _require_keys(config, ["local"], "top-level")
     scenarios = _resolve_workload_scenarios(config)
@@ -1131,6 +1309,14 @@ def run_non_interactive(
             ],
             "local (mode=own)",
         )
+        _require_numeric_fields(
+            local_cfg,
+            ["hardware_cost", "power_watts", "electricity_rate_per_kwh"],
+            "local",
+        )
+        _require_numeric_fields(
+            local_cfg, ["lifetime_years"], "local", allow_zero=False
+        )
 
         def build_local(workload: Workload) -> ComparisonRow:
             return build_local_row(
@@ -1149,6 +1335,9 @@ def run_non_interactive(
             ["power_watts", "electricity_rate_per_kwh"],
             "local (mode=existing)",
         )
+        _require_numeric_fields(
+            local_cfg, ["power_watts", "electricity_rate_per_kwh"], "local"
+        )
 
         def build_local(workload: Workload) -> ComparisonRow:
             return build_local_row(
@@ -1161,6 +1350,7 @@ def run_non_interactive(
 
     elif mode == "rent":
         _require_keys(local_cfg, ["hourly_rate"], "local (mode=rent)")
+        _require_numeric_fields(local_cfg, ["hourly_rate"], "local")
 
         def build_local(workload: Workload) -> ComparisonRow:
             return build_local_row(
