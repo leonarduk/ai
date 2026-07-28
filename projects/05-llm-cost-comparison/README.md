@@ -50,8 +50,12 @@ Walks through:
    hardware cost basis (see below).
 3. **Hosted providers** — pick which models from `pricing.json` to compare
    against, or compare against all of them.
-4. **Results** — one table per scenario, sorted cheapest-first, with an
-   option to export each to CSV or JSON.
+4. **Results** — one report combining every scenario you picked, each as its
+   own labeled, cheapest-first mini-table (so long scenario names and option
+   names don't force every column wide, the way a single flat table with a
+   repeated "Scenario" column would). Exporting writes one CSV/JSON file
+   with a `scenario` column, so a spreadsheet or script can still filter or
+   pivot across scenarios even though the console view keeps them separate.
 
 ### Non-interactive (scripting / CI)
 

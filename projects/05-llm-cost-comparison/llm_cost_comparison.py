@@ -447,45 +447,26 @@ def render_table(rows: list, currency: str = "USD") -> str:
 
 
 def render_combined_table(scenario_rows: list, currency: str = "USD") -> str:
-    """Render several scenarios' rows as one table with a leading Scenario
-    column, instead of one separate table per scenario — for comparing
-    multiple workloads (e.g. "compare all presets") side by side at a glance.
+    """Render several scenarios as one report: a labeled mini-table per
+    scenario, one after another, rather than a single flat table with the
+    scenario name repeated on every row.
 
-    ``scenario_rows`` is a list of ``(scenario_label, rows)`` pairs; each
-    scenario's own rows are cheapest-first internally, same ordering rules
-    as ``render_table`` (infeasible rows sorted to the bottom).
+    A flat table with a "Scenario" column looked fine for two scenarios but
+    became unreadable at five: every column had to widen to fit the longest
+    scenario name repeated dozens of times, and long option names like
+    "Production customer-facing app" made rows wrap badly in a normal
+    terminal width. Separate labeled sections read like a report instead of
+    a spreadsheet dumped to a console.
+
+    ``scenario_rows`` is a list of ``(scenario_label, rows)`` pairs.
     """
-    entries = [
-        (label, r)
-        for label, rows in scenario_rows
-        for r in sorted(rows, key=lambda r: (not r.feasible, r.monthly_cost))
-    ]
-    if not entries:
+    if not scenario_rows:
         return "(no rows to display)"
-    symbol = CURRENCY_SYMBOLS.get(currency, currency + " ")
-    scenario_w = max(len("Scenario"), max(len(label) for label, _ in entries))
-    name_w = max(len("Option"), max(len(r.name) for _, r in entries))
-    cost_w = max(
-        len("Monthly cost"),
-        max(len(f"{symbol}{r.monthly_cost:,.2f}") for _, r in entries),
-    )
-    per_m_w = max(
-        len(f"{symbol}/1M tokens"),
-        max(len(f"{symbol}{r.cost_per_million_tokens:,.2f}") for _, r in entries),
-    )
-    header = (
-        f"{'Scenario':<{scenario_w}}  {'Option':<{name_w}}  {'Monthly cost':>{cost_w}}  "
-        f"{symbol + '/1M tokens':>{per_m_w}}  Notes"
-    )
-    lines = [header, "-" * len(header)]
-    for label, r in entries:
-        cost_s = f"{symbol}{r.monthly_cost:,.2f}"
-        per_m_s = f"{symbol}{r.cost_per_million_tokens:,.2f}"
-        lines.append(
-            f"{label:<{scenario_w}}  {r.name:<{name_w}}  {cost_s:>{cost_w}}  "
-            f"{per_m_s:>{per_m_w}}  {r.notes}"
-        )
-    return "\n".join(lines)
+    sections = []
+    for label, rows in scenario_rows:
+        sections.append(f"-- {label} --")
+        sections.append(render_table(rows, currency=currency))
+    return "\n\n".join(sections)
 
 
 def export_csv(rows: list, path: Path, currency: str = "USD") -> None:
@@ -520,6 +501,53 @@ def export_json(rows: list, path: Path, currency: str = "USD") -> None:
             f"cost_per_million_tokens_{suffix}": round(r.cost_per_million_tokens, 4),
             "notes": r.notes,
         }
+        for r in sorted(rows, key=lambda r: (not r.feasible, r.monthly_cost))
+    ]
+    with open(path, "w", encoding="utf-8") as f:
+        json.dump(data, f, indent=2)
+
+
+def export_combined_csv(scenario_rows: list, path: Path, currency: str = "USD") -> None:
+    """Export several scenarios' rows to one CSV with a leading scenario column."""
+    suffix = currency.lower()
+    with open(path, "w", newline="", encoding="utf-8") as f:
+        writer = csv.writer(f)
+        writer.writerow(
+            [
+                "scenario",
+                "option",
+                f"monthly_cost_{suffix}",
+                f"cost_per_million_tokens_{suffix}",
+                "notes",
+            ]
+        )
+        for label, rows in scenario_rows:
+            for r in sorted(rows, key=lambda r: (not r.feasible, r.monthly_cost)):
+                writer.writerow(
+                    [
+                        label,
+                        r.name,
+                        f"{r.monthly_cost:.4f}",
+                        f"{r.cost_per_million_tokens:.4f}",
+                        r.notes,
+                    ]
+                )
+
+
+def export_combined_json(
+    scenario_rows: list, path: Path, currency: str = "USD"
+) -> None:
+    """Export several scenarios' rows to one JSON file with a scenario field."""
+    suffix = currency.lower()
+    data = [
+        {
+            "scenario": label,
+            "option": r.name,
+            f"monthly_cost_{suffix}": round(r.monthly_cost, 4),
+            f"cost_per_million_tokens_{suffix}": round(r.cost_per_million_tokens, 4),
+            "notes": r.notes,
+        }
+        for label, rows in scenario_rows
         for r in sorted(rows, key=lambda r: (not r.feasible, r.monthly_cost))
     ]
     with open(path, "w", encoding="utf-8") as f:
@@ -1319,11 +1347,22 @@ def run_interactive() -> int:
 
     if prompt_yes_no("\nExport results to a file?", default=False):
         fmt = prompt_choice("Format", ["csv", "json"], default="csv")
-        multiple = len(scenario_rows) > 1
-        for key, (label, _workload, rows) in scenario_rows.items():
-            default_name = (
-                f"cost_comparison_{key}.{fmt}" if multiple else f"cost_comparison.{fmt}"
+        if len(scenario_rows) > 1:
+            default_name = f"cost_comparison.{fmt}"
+            out_path = Path(
+                input(f"Output path [{default_name}]: ").strip() or default_name
             )
+            combined = [
+                (label, rows) for label, _workload, rows in scenario_rows.values()
+            ]
+            if fmt == "csv":
+                export_combined_csv(combined, out_path, currency=display_currency)
+            else:
+                export_combined_json(combined, out_path, currency=display_currency)
+            print(f"Wrote {out_path}")
+        else:
+            ((label, _workload, rows),) = scenario_rows.values()
+            default_name = f"cost_comparison.{fmt}"
             out_path = Path(
                 input(f"Output path for '{label}' [{default_name}]: ").strip()
                 or default_name
@@ -1570,17 +1609,19 @@ def run_non_interactive(
         rows = [build_local(workload)] + build_hosted_rows(workload, pricing, selected)
         scenario_labels_rows.append((label, rows))
 
-        if export_fmt and export_path:
-            scenario_path = (
-                export_path.with_name(f"{export_path.stem}_{key}{export_path.suffix}")
-                if multiple
-                else export_path
-            )
+    if export_fmt and export_path:
+        if multiple:
             if export_fmt == "csv":
-                export_csv(rows, scenario_path)
+                export_combined_csv(scenario_labels_rows, export_path)
             else:
-                export_json(rows, scenario_path)
-            print(f"Wrote {scenario_path}")
+                export_combined_json(scenario_labels_rows, export_path)
+        else:
+            _label, rows = scenario_labels_rows[0]
+            if export_fmt == "csv":
+                export_csv(rows, export_path)
+            else:
+                export_json(rows, export_path)
+        print(f"Wrote {export_path}")
 
     if multiple:
         print("\n== Results (all scenarios) ==")

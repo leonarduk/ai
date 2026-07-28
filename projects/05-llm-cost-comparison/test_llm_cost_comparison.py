@@ -315,7 +315,7 @@ def test_render_table_gbp_currency_uses_pound_symbol():
     assert "$" not in table
 
 
-def test_render_combined_table_includes_scenario_column():
+def test_render_combined_table_sections_each_scenario_separately():
     scenario_rows = [
         (
             "Casual",
@@ -326,10 +326,13 @@ def test_render_combined_table_includes_scenario_column():
             [m.ComparisonRow("Local", monthly_cost=100.0, cost_per_million_tokens=2.0)],
         ),
     ]
-    table = m.render_combined_table(scenario_rows)
-    assert "Scenario" in table
-    assert "Casual" in table and "Production" in table
-    assert table.index("Casual") < table.index("Production")
+    report = m.render_combined_table(scenario_rows)
+    assert "-- Casual --" in report
+    assert "-- Production --" in report
+    assert report.index("-- Casual --") < report.index("-- Production --")
+    # Each scenario's own mini-table appears after its section header.
+    assert report.index("-- Casual --") < report.index("$10.00")
+    assert report.index("-- Production --") < report.index("$100.00")
 
 
 def test_render_combined_table_empty():
@@ -378,6 +381,25 @@ def test_export_csv_and_json_use_currency_suffix(tmp_path: Path):
     m.export_json(rows, json_path, currency="GBP")
     data = json.loads(json_path.read_text(encoding="utf-8"))
     assert data[0]["monthly_cost_gbp"] == 10.0
+
+
+def test_export_combined_csv_and_json_include_scenario_column(tmp_path: Path):
+    scenario_rows = [
+        ("Casual", [m.ComparisonRow("Local", 10.0, 1.0, "note-a")]),
+        ("Production", [m.ComparisonRow("Local", 100.0, 2.0, "note-b")]),
+    ]
+
+    csv_path = tmp_path / "out.csv"
+    m.export_combined_csv(scenario_rows, csv_path)
+    csv_content = csv_path.read_text(encoding="utf-8")
+    assert "scenario" in csv_content
+    assert "Casual" in csv_content and "Production" in csv_content
+
+    json_path = tmp_path / "out.json"
+    m.export_combined_json(scenario_rows, json_path)
+    data = json.loads(json_path.read_text(encoding="utf-8"))
+    assert {row["scenario"] for row in data} == {"Casual", "Production"}
+    assert all("monthly_cost_usd" in row for row in data)
 
 
 # --------------------------------------------------------------------------
@@ -1463,7 +1485,7 @@ def test_resolve_workload_scenarios_unknown_preset_key_raises():
 # --------------------------------------------------------------------------
 
 
-def test_run_non_interactive_multiple_presets_prints_each_and_exports_per_scenario(
+def test_run_non_interactive_multiple_presets_prints_one_combined_table_and_exports_one_file(
     tmp_path: Path, capsys
 ):
     pricing_path = tmp_path / "pricing.json"
@@ -1488,8 +1510,9 @@ def test_run_non_interactive_multiple_presets_prints_each_and_exports_per_scenar
 
     assert exit_code == 0
     out = capsys.readouterr().out
-    assert "Casual personal use" in out
-    assert "Autonomous coding agent" in out
-    assert (tmp_path / "out_casual.json").exists()
-    assert (tmp_path / "out_coding_agent.json").exists()
-    assert not export_path.exists()  # suffixed per scenario, not the bare path
+    assert "-- Casual personal use --" in out
+    assert "-- Autonomous coding agent --" in out
+    assert export_path.exists()
+    data = json.loads(export_path.read_text(encoding="utf-8"))
+    scenarios_seen = {row["scenario"] for row in data}
+    assert scenarios_seen == {"Casual personal use", "Autonomous coding agent"}
