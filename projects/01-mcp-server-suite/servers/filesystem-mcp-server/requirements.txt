@@ -1,5 +1,5 @@
 # MCP framework
-mcp>=0.1.0
+mcp>=0.1.0,<2.0.0
 
 # File processing
 pandas>=2.0.0
