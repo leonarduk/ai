@@ -708,11 +708,19 @@ def run_non_interactive(
     pricing_path = Path(config.get("pricing_file", DEFAULT_PRICING_PATH))
     if not pricing_path.is_absolute():
         pricing_path = config_path.parent / pricing_path
-    pricing = load_pricing(pricing_path)
+    try:
+        pricing = load_pricing(pricing_path)
+    except FileNotFoundError as exc:
+        raise ConfigError(f"pricing file not found: {pricing_path}") from exc
     selected = set(config["selected_models"]) if config.get("selected_models") else None
 
     local_cfg = config["local"]
     _require_keys(local_cfg, ["mode", "tokens_per_sec"], "local")
+    tokens_per_sec = local_cfg["tokens_per_sec"]
+    if not isinstance(tokens_per_sec, (int, float)) or tokens_per_sec <= 0:
+        raise ConfigError(
+            f"local.tokens_per_sec must be a positive number, got {tokens_per_sec!r}"
+        )
     mode = local_cfg["mode"]
     if mode == "own":
         _require_keys(
