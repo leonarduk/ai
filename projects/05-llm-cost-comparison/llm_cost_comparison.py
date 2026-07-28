@@ -700,10 +700,21 @@ def run_non_interactive(
         ["requests_per_day", "avg_input_tokens", "avg_output_tokens"],
         "workload",
     )
+    for field_name in ("requests_per_day", "avg_input_tokens", "avg_output_tokens"):
+        value = config["workload"][field_name]
+        if not isinstance(value, (int, float)) or value < 0:
+            raise ConfigError(
+                f"workload.{field_name} must be a non-negative number, got {value!r}"
+            )
     try:
         workload = Workload(**config["workload"])
     except TypeError as exc:
         raise ConfigError(f"workload config has an unexpected field: {exc}") from exc
+    if workload.monthly_total_tokens <= 0:
+        raise ConfigError(
+            "workload produces zero total tokens/month — set requests_per_day and at "
+            "least one of avg_input_tokens/avg_output_tokens above zero"
+        )
 
     pricing_path = Path(config.get("pricing_file", DEFAULT_PRICING_PATH))
     if not pricing_path.is_absolute():

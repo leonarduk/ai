@@ -750,3 +750,66 @@ def test_run_non_interactive_rejects_nonpositive_tokens_per_sec(
 
     with pytest.raises(m.ConfigError, match="tokens_per_sec"):
         m.run_non_interactive(config_path, export_fmt=None, export_path=None)
+
+
+def test_run_non_interactive_rejects_zero_total_workload_tokens(tmp_path: Path):
+    pricing_path = tmp_path / "pricing.json"
+    _write_pricing(pricing_path)
+    config_path = tmp_path / "config.json"
+    config = {
+        "workload": {
+            "requests_per_day": 1000,
+            "avg_input_tokens": 0,
+            "avg_output_tokens": 0,
+        },
+        "local": {"mode": "rent", "tokens_per_sec": 40, "hourly_rate": 2.5},
+        "pricing_file": str(pricing_path),
+    }
+    config_path.write_text(json.dumps(config), encoding="utf-8")
+
+    with pytest.raises(m.ConfigError, match="zero total tokens"):
+        m.run_non_interactive(config_path, export_fmt=None, export_path=None)
+
+
+@pytest.mark.parametrize("bad_value", [-1, "many"])
+def test_run_non_interactive_rejects_bad_workload_field(tmp_path: Path, bad_value):
+    pricing_path = tmp_path / "pricing.json"
+    _write_pricing(pricing_path)
+    config_path = tmp_path / "config.json"
+    config = {
+        "workload": {
+            "requests_per_day": bad_value,
+            "avg_input_tokens": 500,
+            "avg_output_tokens": 300,
+        },
+        "local": {"mode": "rent", "tokens_per_sec": 40, "hourly_rate": 2.5},
+        "pricing_file": str(pricing_path),
+    }
+    config_path.write_text(json.dumps(config), encoding="utf-8")
+
+    with pytest.raises(m.ConfigError, match="requests_per_day"):
+        m.run_non_interactive(config_path, export_fmt=None, export_path=None)
+
+
+def test_run_non_interactive_allows_zero_output_tokens_for_input_only_workload(
+    tmp_path: Path, capsys
+):
+    # avg_output_tokens == 0 alone is legitimate (e.g. a classification-only
+    # workload) as long as total tokens/month is still positive.
+    pricing_path = tmp_path / "pricing.json"
+    _write_pricing(pricing_path)
+    config_path = tmp_path / "config.json"
+    config = {
+        "workload": {
+            "requests_per_day": 1000,
+            "avg_input_tokens": 500,
+            "avg_output_tokens": 0,
+        },
+        "local": {"mode": "rent", "tokens_per_sec": 40, "hourly_rate": 2.5},
+        "pricing_file": str(pricing_path),
+    }
+    config_path.write_text(json.dumps(config), encoding="utf-8")
+
+    exit_code = m.run_non_interactive(config_path, export_fmt=None, export_path=None)
+    assert exit_code == 0
+    assert "Claude Opus 5" in capsys.readouterr().out
