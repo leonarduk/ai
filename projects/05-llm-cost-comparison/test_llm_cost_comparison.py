@@ -258,6 +258,13 @@ def test_load_shipped_pricing_file_is_well_formed():
         assert info["output_per_million"] > 0
 
 
+def test_load_pricing_raises_config_error_on_invalid_json(tmp_path: Path):
+    bad_path = tmp_path / "pricing.json"
+    bad_path.write_text("{not valid json", encoding="utf-8")
+    with pytest.raises(m.ConfigError, match="not valid JSON"):
+        m.load_pricing(bad_path)
+
+
 # --------------------------------------------------------------------------
 # Rendering / export
 # --------------------------------------------------------------------------

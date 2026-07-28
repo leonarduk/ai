@@ -65,7 +65,10 @@ def load_pricing(path: Path = DEFAULT_PRICING_PATH) -> dict:
     be updated by editing ``pricing.json`` without touching this script.
     """
     with open(path, "r", encoding="utf-8") as f:
-        return json.load(f)
+        try:
+            return json.load(f)
+        except json.JSONDecodeError as exc:
+            raise ConfigError(f"pricing file {path} is not valid JSON: {exc}") from exc
 
 
 def iter_models(pricing: dict):
@@ -1676,6 +1679,9 @@ def main(argv: Optional[list] = None) -> int:
         return run_interactive()
     except (KeyboardInterrupt, EOFError):
         print("\nCancelled.")
+        return 1
+    except ConfigError as exc:
+        print(f"Config error: {exc}", file=sys.stderr)
         return 1
 
 
