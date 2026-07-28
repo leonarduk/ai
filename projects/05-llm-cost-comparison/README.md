@@ -101,8 +101,11 @@ requests/day and token counts behind each one.
   to guess up front:
   - *Machine already on for other reasons* → the **extra** power the
     GPU/CPU draw under load, above idle. If a benchmark ran, this is
-    measured automatically (peak power during the benchmark minus the idle
-    reading taken at GPU detection) instead of guessed.
+    measured automatically (the average power draw across the whole
+    benchmark, minus an averaged idle reading) instead of guessed. Both
+    sides are averages of several quick `nvidia-smi` samples rather than a
+    single reading, since one instantaneous sample — especially on a laptop
+    GPU — can vary a lot between runs of the same hardware.
   - *Machine only powered on to run this* → the **whole system's** draw
     while running, since the entire session's electricity is attributable
     to this use (measured extra draw plus an allowance for the rest of the

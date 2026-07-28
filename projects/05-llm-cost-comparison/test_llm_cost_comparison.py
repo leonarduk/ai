@@ -778,7 +778,10 @@ def test_benchmark_openai_compatible_rejects_non_http_url():
         m.benchmark_openai_compatible("ftp://example.com", "some-model")
 
 
-def test_measure_gpu_power_during_returns_peak_reading(monkeypatch):
+def test_measure_gpu_power_during_returns_average_reading(monkeypatch):
+    # A single peak sample is one noisy driver reading away from being an
+    # outlier; averaging every reading taken during the run is what makes
+    # the estimate stable between runs of the same hardware.
     readings = iter(
         [
             {"name": "RTX 4090", "power_draw_w": 40.0},
@@ -788,22 +791,45 @@ def test_measure_gpu_power_during_returns_peak_reading(monkeypatch):
     monkeypatch.setattr(
         m,
         "detect_nvidia_gpu",
-        lambda runner=None: next(readings, {"name": "RTX 4090", "power_draw_w": 380.0}),
+        lambda runner=None: next(readings, None),
     )
-    result, peak = m.measure_gpu_power_during(
+    result, avg = m.measure_gpu_power_during(
         lambda: "done", runner=lambda *a, **k: None, poll_interval=0.01
     )
     assert result == "done"
-    assert peak is not None and peak >= 40.0
+    # Only two readings are queued, so the average must be strictly between
+    # them (never equal to the peak) regardless of how many polls actually
+    # ran before func() returned.
+    assert avg is not None and 40.0 <= avg <= 380.0
 
 
-def test_measure_gpu_power_during_returns_none_peak_without_gpu(monkeypatch):
+def test_measure_gpu_power_during_returns_none_average_without_gpu(monkeypatch):
     monkeypatch.setattr(m, "detect_nvidia_gpu", lambda runner=None: None)
-    result, peak = m.measure_gpu_power_during(
+    result, avg = m.measure_gpu_power_during(
         lambda: 42, runner=lambda *a, **k: None, poll_interval=0.01
     )
     assert result == 42
-    assert peak is None
+    assert avg is None
+
+
+def test_average_gpu_power_w_averages_multiple_samples(monkeypatch):
+    readings = iter(
+        [
+            {"name": "RTX 4090", "power_draw_w": 10.0},
+            {"name": "RTX 4090", "power_draw_w": 20.0},
+            {"name": "RTX 4090", "power_draw_w": 30.0},
+        ]
+    )
+    monkeypatch.setattr(m, "detect_nvidia_gpu", lambda runner=None: next(readings))
+    monkeypatch.setattr(m.time, "sleep", lambda _: None)
+    avg = m.average_gpu_power_w(samples=3, interval=0.0)
+    assert avg == pytest.approx(20.0)
+
+
+def test_average_gpu_power_w_returns_none_without_gpu(monkeypatch):
+    monkeypatch.setattr(m, "detect_nvidia_gpu", lambda runner=None: None)
+    monkeypatch.setattr(m.time, "sleep", lambda _: None)
+    assert m.average_gpu_power_w(samples=3, interval=0.0) is None
 
 
 def test_fetch_octopus_agile_rate_parses_current_slot(monkeypatch):

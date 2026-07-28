@@ -725,15 +725,41 @@ def detect_nvidia_gpu(runner: Callable = subprocess.run) -> Optional[dict]:
     }
 
 
+def average_gpu_power_w(
+    runner: Callable = subprocess.run, samples: int = 3, interval: float = 0.3
+) -> Optional[float]:
+    """Average a handful of quick ``power.draw`` readings instead of trusting one.
+
+    A single ``nvidia-smi`` query can be noisy — especially on a laptop GPU,
+    which tends to report power in coarser steps and shift with whatever
+    else the OS/driver is doing at that exact instant — so one instantaneous
+    reading used as an "idle" baseline can vary a lot between runs of the
+    same hardware. Averaging a few readings a fraction of a second apart
+    smooths that out. Returns None if no reading was ever available.
+    """
+    readings = []
+    for i in range(samples):
+        info = detect_nvidia_gpu(runner)
+        if info and info.get("power_draw_w") is not None:
+            readings.append(info["power_draw_w"])
+        if i < samples - 1:
+            time.sleep(interval)
+    return sum(readings) / len(readings) if readings else None
+
+
 def measure_gpu_power_during(
     func: Callable, runner: Callable = subprocess.run, poll_interval: float = 0.5
 ) -> tuple:
-    """Run ``func()`` while polling GPU power draw; return ``(result, peak_watts)``.
+    """Run ``func()`` while polling GPU power draw; return ``(result, avg_watts)``.
 
-    ``peak_watts`` is the highest ``power.draw`` reading seen while ``func``
-    was running, or None if no reading was available (no GPU, or ``func``
-    finished before the first poll). This lets the benchmark step measure a
-    real "under load" wattage instead of asking the user to guess it.
+    ``avg_watts`` is the average of every ``power.draw`` reading seen while
+    ``func`` was running, or None if no reading was available (no GPU, or
+    ``func`` finished before the first poll). A single peak reading is one
+    noisy driver sample away from being an outlier; averaging across the
+    whole benchmark is a far more stable estimate of sustained draw under
+    load — which is what a monthly electricity estimate actually needs,
+    since real usage is however long generation actually runs, not one
+    instantaneous spike.
     """
     readings = []
     stop = threading.Event()
@@ -752,7 +778,8 @@ def measure_gpu_power_during(
     finally:
         stop.set()
         thread.join(timeout=poll_interval * 4)
-    return result, (max(readings) if readings else None)
+    avg_watts = sum(readings) / len(readings) if readings else None
+    return result, avg_watts
 
 
 OCTOPUS_PRODUCTS_URL = "https://api.octopus.energy/v1/products/"
@@ -1207,6 +1234,12 @@ def interactive_local_setup() -> tuple:
     ):
         gpu_info = detect_nvidia_gpu()
         if gpu_info:
+            # A single power.draw sample is noisy (especially on a laptop
+            # GPU) — average a few quick readings for a steadier idle
+            # baseline instead of trusting the one snapshot from detection.
+            idle_avg = average_gpu_power_w()
+            if idle_avg is not None:
+                gpu_info["power_draw_w"] = idle_avg
             print(f"  Detected: {format_gpu_summary(gpu_info)}")
         else:
             print(
@@ -1317,17 +1350,18 @@ def interactive_local_setup() -> tuple:
         idle_draw = gpu_info.get("power_draw_w") if gpu_info else None
         extra_default = None
         if measured_load_power_w is not None and idle_draw is not None:
-            extra_default = max(measured_load_power_w - idle_draw, 0.0)
+            extra_default = round(max(measured_load_power_w - idle_draw, 0.0))
             print(
-                f"  Extra power draw estimate: {extra_default:.0f} W (measured: load "
-                f"{measured_load_power_w:.0f} W minus idle {idle_draw:.0f} W)"
+                f"  Extra power draw estimate: {extra_default:.0f} W (measured: "
+                f"average load {measured_load_power_w:.0f} W minus average idle "
+                f"{idle_draw:.0f} W)"
             )
         elif gpu_info:
             gpu_defaults = lookup_gpu_defaults(gpu_info["name"])
             if gpu_defaults:
                 _, typical_load_power = gpu_defaults
                 baseline_idle = idle_draw if idle_draw is not None else 0.0
-                extra_default = max(typical_load_power - baseline_idle, 0.0)
+                extra_default = round(max(typical_load_power - baseline_idle, 0.0))
                 print(
                     f"  Extra power draw estimate: {extra_default:.0f} W (calculated: "
                     f"{gpu_info['name']}'s typical load power {typical_load_power:.0f} W "
