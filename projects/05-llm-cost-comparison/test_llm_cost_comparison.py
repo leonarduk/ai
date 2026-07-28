@@ -147,8 +147,8 @@ def test_build_local_row_flags_when_throughput_cannot_keep_up_in_real_time():
         power_watts=100,
         electricity_rate_per_kwh=0.15,
     )
-    assert "can't keep up" in row.notes
-    assert "exceeds" in row.notes
+    assert "needs ~" in row.notes
+    assert "x this throughput" in row.notes
     assert row.feasible is False
 
 
@@ -161,7 +161,7 @@ def test_build_local_row_no_warning_when_throughput_is_sufficient():
         power_watts=100,
         electricity_rate_per_kwh=0.15,
     )
-    assert "can't keep up" not in row.notes
+    assert "needs ~" not in row.notes
 
 
 def test_build_local_row_rented():
@@ -313,6 +313,27 @@ def test_render_table_gbp_currency_uses_pound_symbol():
     table = m.render_table(rows, currency="GBP")
     assert "£10.00" in table
     assert "$" not in table
+
+
+def test_render_combined_table_includes_scenario_column():
+    scenario_rows = [
+        (
+            "Casual",
+            [m.ComparisonRow("Local", monthly_cost=10.0, cost_per_million_tokens=1.0)],
+        ),
+        (
+            "Production",
+            [m.ComparisonRow("Local", monthly_cost=100.0, cost_per_million_tokens=2.0)],
+        ),
+    ]
+    table = m.render_combined_table(scenario_rows)
+    assert "Scenario" in table
+    assert "Casual" in table and "Production" in table
+    assert table.index("Casual") < table.index("Production")
+
+
+def test_render_combined_table_empty():
+    assert "no rows" in m.render_combined_table([])
 
 
 def test_convert_rows_currency_divides_by_rate():

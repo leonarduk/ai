@@ -11,7 +11,7 @@
           "output_per_million": 25.00
         },
         "sonnet-5": {
-          "display_name": "Claude Sonnet 5 (introductory rate through 2026-08-31)",
+          "display_name": "Claude Sonnet 5 (intro rate through 2026-08-31, then $3.00/$15.00 per 1M)",
           "input_per_million": 2.00,
           "output_per_million": 10.00
         },

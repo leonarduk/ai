@@ -338,13 +338,7 @@ def build_local_row(
     feasible = hours_needed <= HOURS_PER_MONTH
     if not feasible:
         parallel_needed = hours_needed / HOURS_PER_MONTH
-        notes += (
-            f" — ⚠️ exceeds the {HOURS_PER_MONTH:.0f} hours in a month: this "
-            f"throughput can't keep up with the workload in real time (would need "
-            f"~{parallel_needed:.1f}x the capacity, e.g. that many machines running "
-            "in parallel); the cost above is what that much compute would cost, not "
-            "what one machine running 24/7 costs"
-        )
+        notes += f" — ⚠️ needs ~{parallel_needed:.1f}x this throughput to keep up (not a real 24/7 cost)"
     return ComparisonRow(name, monthly_cost, per_million, notes, feasible=feasible)
 
 
@@ -448,6 +442,48 @@ def render_table(rows: list, currency: str = "USD") -> str:
         lines.append("")
         lines.append(
             f"Cheapest: {cheapest.name} — most expensive option is {multiple:.1f}x its cost."
+        )
+    return "\n".join(lines)
+
+
+def render_combined_table(scenario_rows: list, currency: str = "USD") -> str:
+    """Render several scenarios' rows as one table with a leading Scenario
+    column, instead of one separate table per scenario — for comparing
+    multiple workloads (e.g. "compare all presets") side by side at a glance.
+
+    ``scenario_rows`` is a list of ``(scenario_label, rows)`` pairs; each
+    scenario's own rows are cheapest-first internally, same ordering rules
+    as ``render_table`` (infeasible rows sorted to the bottom).
+    """
+    entries = [
+        (label, r)
+        for label, rows in scenario_rows
+        for r in sorted(rows, key=lambda r: (not r.feasible, r.monthly_cost))
+    ]
+    if not entries:
+        return "(no rows to display)"
+    symbol = CURRENCY_SYMBOLS.get(currency, currency + " ")
+    scenario_w = max(len("Scenario"), max(len(label) for label, _ in entries))
+    name_w = max(len("Option"), max(len(r.name) for _, r in entries))
+    cost_w = max(
+        len("Monthly cost"),
+        max(len(f"{symbol}{r.monthly_cost:,.2f}") for _, r in entries),
+    )
+    per_m_w = max(
+        len(f"{symbol}/1M tokens"),
+        max(len(f"{symbol}{r.cost_per_million_tokens:,.2f}") for _, r in entries),
+    )
+    header = (
+        f"{'Scenario':<{scenario_w}}  {'Option':<{name_w}}  {'Monthly cost':>{cost_w}}  "
+        f"{symbol + '/1M tokens':>{per_m_w}}  Notes"
+    )
+    lines = [header, "-" * len(header)]
+    for label, r in entries:
+        cost_s = f"{symbol}{r.monthly_cost:,.2f}"
+        per_m_s = f"{symbol}{r.cost_per_million_tokens:,.2f}"
+        lines.append(
+            f"{label:<{scenario_w}}  {r.name:<{name_w}}  {cost_s:>{cost_w}}  "
+            f"{per_m_s:>{per_m_w}}  {r.notes}"
         )
     return "\n".join(lines)
 
@@ -1263,6 +1299,8 @@ def run_interactive() -> int:
             rows = convert_rows_currency(rows, usd_per_gbp)
         scenario_rows[key] = (label, workload, rows)
 
+    if len(scenario_rows) == 1:
+        ((label, workload, rows),) = scenario_rows.values()
         print(f"\n== Results: {label} ==")
         print(
             f"Workload: {workload.requests_per_day:.0f} requests/day, "
@@ -1270,6 +1308,14 @@ def run_interactive() -> int:
         )
         print()
         print(render_table(rows, currency=display_currency))
+    else:
+        print("\n== Results (all scenarios) ==")
+        print(
+            render_combined_table(
+                [(label, rows) for label, _workload, rows in scenario_rows.values()],
+                currency=display_currency,
+            )
+        )
 
     if prompt_yes_no("\nExport results to a file?", default=False):
         fmt = prompt_choice("Format", ["csv", "json"], default="csv")
@@ -1519,10 +1565,10 @@ def run_non_interactive(
         )
 
     multiple = len(scenarios) > 1
+    scenario_labels_rows = []
     for key, label, workload in scenarios:
         rows = [build_local(workload)] + build_hosted_rows(workload, pricing, selected)
-        print(f"\n== {label} ==")
-        print(render_table(rows))
+        scenario_labels_rows.append((label, rows))
 
         if export_fmt and export_path:
             scenario_path = (
@@ -1535,6 +1581,14 @@ def run_non_interactive(
             else:
                 export_json(rows, scenario_path)
             print(f"Wrote {scenario_path}")
+
+    if multiple:
+        print("\n== Results (all scenarios) ==")
+        print(render_combined_table(scenario_labels_rows))
+    else:
+        label, rows = scenario_labels_rows[0]
+        print(f"\n== {label} ==")
+        print(render_table(rows))
     return 0
 
 
