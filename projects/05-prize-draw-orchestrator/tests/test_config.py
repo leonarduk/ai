@@ -4,12 +4,16 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
+import config as config_mod
 from config import Config, DEFAULT_CRITERIA
 
 
 class TestConfigFromEnv:
     def test_defaults_to_ollama_and_dry_run(self, monkeypatch, tmp_path):
         monkeypatch.chdir(tmp_path)
+        # from_env() loads .env relative to config.py, not the cwd, so a
+        # project-local .env could otherwise restore the vars deleted below.
+        monkeypatch.setattr(config_mod, "load_dotenv", lambda *args, **kwargs: None)
         for key in [
             "LLM_PROVIDER",
             "DEEPSEEK_API_KEY",

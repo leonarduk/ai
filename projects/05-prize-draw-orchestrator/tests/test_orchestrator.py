@@ -84,8 +84,10 @@ class TestProcessCandidate:
                 "dry_run": True,
             }
         ]
-        assert client.records[-1]["draw_id"] == "draw-1"
-        assert client.records[-1]["status"] == "dry_run"
+        # Dry runs must not write a check_log record: doing so would mark the
+        # draw "seen" and cause check_duplicate to skip it once the operator
+        # goes live, defeating the dry-run-then-go-live workflow.
+        assert client.records == []
 
     def test_requires_purchase_is_flagged_for_review_not_entered(self):
         client = FakeMCPToolClient(

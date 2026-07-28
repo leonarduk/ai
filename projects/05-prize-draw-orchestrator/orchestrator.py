@@ -194,16 +194,17 @@ def process_candidate(
             "dry_run": dry_run,
         },
     )
-    mcp_client.call_tool(
-        "check_log",
-        {
-            "record": {
-                "draw_id": draw_id,
-                "status": "dry_run" if dry_run else result.get("status", "entered"),
-                "prize": parsed.get("prize"),
-            }
-        },
-    )
+    if not dry_run:
+        mcp_client.call_tool(
+            "check_log",
+            {
+                "record": {
+                    "draw_id": draw_id,
+                    "status": result.get("status", "entered"),
+                    "prize": parsed.get("prize"),
+                }
+            },
+        )
     parsed["submit_result"] = result
     return "entered", parsed
 
@@ -238,6 +239,12 @@ def run_once(
             )
         except (MCPToolError, LLMProviderError) as exc:
             logger.error("Error processing draw %s: %s", draw_id, exc)
+            summary.errors.append({"draw_id": draw_id, "error": str(exc)})
+            continue
+        except (
+            Exception
+        ) as exc:  # noqa: BLE001 - one bad candidate must not abort the run
+            logger.exception("Unexpected error processing draw %s", draw_id)
             summary.errors.append({"draw_id": draw_id, "error": str(exc)})
             continue
 

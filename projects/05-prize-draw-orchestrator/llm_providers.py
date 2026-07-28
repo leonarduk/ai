@@ -75,6 +75,7 @@ class OllamaProvider:
         model: str = DEFAULT_OLLAMA_MODEL,
         timeout: int = DEFAULT_TIMEOUT,
     ):
+        """Configure the Ollama endpoint, model, and per-request timeout."""
         self.host = host
         self.model = model
         self.timeout = timeout
@@ -82,6 +83,7 @@ class OllamaProvider:
     def generate_json(
         self, prompt: str, schema: dict[str, Any] | None = None
     ) -> dict[str, Any]:
+        """Call Ollama's `/api/generate` with structured-output `format`, parse the JSON reply."""
         payload: dict[str, Any] = {
             "model": self.model,
             "prompt": prompt,
@@ -95,6 +97,7 @@ class OllamaProvider:
                 timeout=self.timeout,
             )
             response.raise_for_status()
+            raw_text = response.json().get("response", "")
         except requests.exceptions.ConnectionError as exc:
             raise LLMProviderError(
                 f"Could not reach local Ollama server at {self.host}. Is `ollama serve` running?"
@@ -102,7 +105,6 @@ class OllamaProvider:
         except requests.exceptions.RequestException as exc:
             raise LLMProviderError(f"Ollama request failed: {exc}") from exc
 
-        raw_text = response.json().get("response", "")
         return _parse_json_object(raw_text, "Ollama")
 
 
@@ -123,6 +125,7 @@ class DeepSeekProvider:
         base_url: str = DEFAULT_DEEPSEEK_BASE_URL,
         timeout: int = DEFAULT_TIMEOUT,
     ):
+        """Configure the DeepSeek API key, model, base URL, and timeout."""
         if not api_key:
             raise LLMProviderError(
                 "DeepSeek provider requires DEEPSEEK_API_KEY to be set."
@@ -135,6 +138,7 @@ class DeepSeekProvider:
     def generate_json(
         self, prompt: str, schema: dict[str, Any] | None = None
     ) -> dict[str, Any]:
+        """Call DeepSeek's chat completions API and parse the reply as a JSON object."""
         payload = {
             "model": self.model,
             "messages": [{"role": "user", "content": prompt}],
@@ -153,10 +157,10 @@ class DeepSeekProvider:
                 timeout=self.timeout,
             )
             response.raise_for_status()
+            data = response.json()
         except requests.exceptions.RequestException as exc:
             raise LLMProviderError(f"DeepSeek request failed: {exc}") from exc
 
-        data = response.json()
         choices = data.get("choices", [])
         if not choices:
             raise LLMProviderError(f"DeepSeek returned no choices: {data!r}")
@@ -181,6 +185,7 @@ class ClaudeProvider:
         max_tokens: int = 2000,
         timeout: int = DEFAULT_TIMEOUT,
     ):
+        """Configure the Anthropic API key, model, max tokens, and timeout."""
         if not api_key:
             raise LLMProviderError(
                 "Claude provider requires ANTHROPIC_API_KEY to be set."
@@ -193,6 +198,7 @@ class ClaudeProvider:
     def generate_json(
         self, prompt: str, schema: dict[str, Any] | None = None
     ) -> dict[str, Any]:
+        """Call Anthropic's Messages API and parse the reply's text content as JSON."""
         payload = {
             "model": self.model,
             "max_tokens": self.max_tokens,
@@ -211,10 +217,10 @@ class ClaudeProvider:
                 timeout=self.timeout,
             )
             response.raise_for_status()
+            data = response.json()
         except requests.exceptions.RequestException as exc:
             raise LLMProviderError(f"Claude request failed: {exc}") from exc
 
-        data = response.json()
         content = data.get("content", [])
         text = "\n".join(
             block.get("text", "") for block in content if block.get("type") == "text"

@@ -53,6 +53,7 @@ class StdioMCPToolClient:
         args: list[str] | None = None,
         env: dict[str, str] | None = None,
     ):
+        """Store the server subprocess command/args/env for later lazy connection."""
         self.command = command
         self.args = args or []
         self.env = env
@@ -93,6 +94,10 @@ class StdioMCPToolClient:
 
         if getattr(result, "isError", False):
             raise MCPToolError(f"MCP tool '{name}' returned an error: {result}")
+
+        structured = getattr(result, "structuredContent", None)
+        if isinstance(structured, dict):
+            return structured
 
         for block in getattr(result, "content", []):
             text = getattr(block, "text", None)

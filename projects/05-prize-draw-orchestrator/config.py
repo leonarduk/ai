@@ -89,6 +89,9 @@ class Config:
             if mcp_args_raw.strip().startswith("[")
             else mcp_args_raw.split()
         )
+        interval_minutes = int(os.getenv("RUN_INTERVAL_MINUTES", "60"))
+        if interval_minutes <= 0:
+            raise ValueError("RUN_INTERVAL_MINUTES must be greater than zero")
 
         return cls(
             llm_provider=os.getenv("LLM_PROVIDER", "ollama"),
@@ -107,5 +110,5 @@ class Config:
             .lower()
             in ("true", "1", "yes"),
             criteria=_load_criteria(os.getenv("CRITERIA_CONFIG_PATH")),
-            interval_minutes=int(os.getenv("RUN_INTERVAL_MINUTES", "60")),
+            interval_minutes=interval_minutes,
         )

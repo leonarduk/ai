@@ -138,8 +138,10 @@ python cli.py --live
 ## Criteria
 
 Draw-matching criteria (prize type/value, entry method, region, max days to
-closing) are loaded from the JSON file at `CRITERIA_CONFIG_PATH` (default
-`criteria.example.json`). Copy and edit it to match what you want to enter.
+closing) are loaded from the JSON file at `CRITERIA_CONFIG_PATH`. If unset,
+built-in defaults are used — `criteria.example.json` is a starting point, not
+a fallback file, so copy it, edit it, and set `CRITERIA_CONFIG_PATH` to point
+at your copy for it to actually take effect.
 
 ## Tests
 

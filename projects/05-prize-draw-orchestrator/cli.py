@@ -20,6 +20,7 @@ logger = logging.getLogger("prize_draw_orchestrator")
 
 
 def parse_args(argv=None) -> argparse.Namespace:
+    """Parse CLI flags controlling run mode (once/loop), dry-run, and logging."""
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument(
         "--once",
@@ -42,6 +43,7 @@ def parse_args(argv=None) -> argparse.Namespace:
 
 
 def main(argv=None) -> None:
+    """Wire up config, LLM provider, and MCP client, then run once or loop forever."""
     args = parse_args(argv)
     logging.basicConfig(
         level=logging.DEBUG if args.verbose else logging.INFO,
