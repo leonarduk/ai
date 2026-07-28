@@ -593,6 +593,27 @@ def test_fetch_octopus_agile_rate_returns_none_when_no_agile_product(monkeypatch
     assert m.fetch_octopus_agile_rate("C") is None
 
 
+def test_fetch_fx_rate_parses_response(monkeypatch):
+    body = json.dumps(
+        {"amount": 1, "base": "GBP", "date": "2026-07-28", "rates": {"USD": 1.27}}
+    ).encode("utf-8")
+
+    def fake_urlopen(url, timeout=None):
+        assert "from=GBP" in url and "to=USD" in url
+        return _FakeHTTPResponse(body)
+
+    monkeypatch.setattr(m.urllib.request, "urlopen", fake_urlopen)
+    assert m.fetch_fx_rate("GBP", "USD") == pytest.approx(1.27)
+
+
+def test_fetch_fx_rate_returns_none_on_failure(monkeypatch):
+    def fake_urlopen(url, timeout=None):
+        raise OSError("network down")
+
+    monkeypatch.setattr(m.urllib.request, "urlopen", fake_urlopen)
+    assert m.fetch_fx_rate("GBP", "USD") is None
+
+
 # --------------------------------------------------------------------------
 # prompt_float minimum enforcement
 # --------------------------------------------------------------------------

@@ -555,6 +555,27 @@ def fetch_octopus_agile_rate(
         return None
 
 
+FRANKFURTER_URL = "https://api.frankfurter.dev/v1/latest"
+
+
+def fetch_fx_rate(
+    from_currency: str, to_currency: str, timeout: float = 5.0
+) -> Optional[float]:
+    """Best-effort live exchange rate via the free, no-auth Frankfurter API.
+
+    Returns None on any failure (network, unknown currency, parsing) so
+    callers fall back to manual entry rather than hardcoding a rate that
+    goes stale.
+    """
+    try:
+        url = f"{FRANKFURTER_URL}?from={from_currency}&to={to_currency}"
+        with urllib.request.urlopen(url, timeout=timeout) as resp:
+            data = json.loads(resp.read())
+        return data["rates"][to_currency]
+    except Exception:  # noqa: BLE001 - best-effort, any failure just falls back
+        return None
+
+
 # Rough street price (USD) and typical power draw under load (W) for common
 # GPUs, matched by substring against a detected card's name. These are
 # ballpark figures meant to prefill a realistic starting point instead of a
@@ -1048,10 +1069,15 @@ def interactive_local_setup() -> Callable[[Workload], list]:
                 gbp_rate = prompt_float(
                     "Electricity rate (GBP/kWh)", default=0.2483, minimum=0
                 )
+            live_usd_per_gbp = fetch_fx_rate("GBP", "USD")
+            if live_usd_per_gbp is not None:
+                print(f"  Current GBP→USD exchange rate: {live_usd_per_gbp:.4f}")
+            else:
+                print("  Could not fetch a live exchange rate — enter manually.")
             usd_per_gbp = prompt_float(
                 "GBP→USD exchange rate (so this can be compared against USD hosted "
                 "pricing)",
-                default=1.27,
+                default=live_usd_per_gbp if live_usd_per_gbp is not None else 1.27,
                 minimum=0,
             )
             electricity_rate = gbp_rate * usd_per_gbp
