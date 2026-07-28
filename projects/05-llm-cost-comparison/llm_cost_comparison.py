@@ -555,25 +555,35 @@ def fetch_octopus_agile_rate(
         return None
 
 
-FRANKFURTER_URL = "https://api.frankfurter.dev/v1/latest"
+# Tried in order; each is a free, no-auth-required FX API. Frankfurter has
+# moved domains before (frankfurter.app -> frankfurter.dev), and any single
+# provider can be down or blocked on a given network, so falling through to
+# the next one is more robust than depending on exactly one host.
+FX_RATE_URL_TEMPLATES: tuple = (
+    "https://api.frankfurter.dev/v1/latest?from={from_currency}&to={to_currency}",
+    "https://api.frankfurter.app/v1/latest?from={from_currency}&to={to_currency}",
+    "https://api.exchangerate.host/latest?base={from_currency}&symbols={to_currency}",
+)
 
 
 def fetch_fx_rate(
     from_currency: str, to_currency: str, timeout: float = 5.0
 ) -> Optional[float]:
-    """Best-effort live exchange rate via the free, no-auth Frankfurter API.
+    """Best-effort live exchange rate, trying each of ``FX_RATE_URL_TEMPLATES``.
 
-    Returns None on any failure (network, unknown currency, parsing) so
-    callers fall back to manual entry rather than hardcoding a rate that
-    goes stale.
+    Returns None only if every provider fails (network, unknown currency,
+    parsing) so callers fall back to manual entry rather than hardcoding a
+    rate that goes stale.
     """
-    try:
-        url = f"{FRANKFURTER_URL}?from={from_currency}&to={to_currency}"
-        with urllib.request.urlopen(url, timeout=timeout) as resp:
-            data = json.loads(resp.read())
-        return data["rates"][to_currency]
-    except Exception:  # noqa: BLE001 - best-effort, any failure just falls back
-        return None
+    for template in FX_RATE_URL_TEMPLATES:
+        url = template.format(from_currency=from_currency, to_currency=to_currency)
+        try:
+            with urllib.request.urlopen(url, timeout=timeout) as resp:
+                data = json.loads(resp.read())
+            return data["rates"][to_currency]
+        except Exception:  # noqa: BLE001 - best-effort, try the next provider
+            continue
+    return None
 
 
 # Rough street price (USD) and typical power draw under load (W) for common

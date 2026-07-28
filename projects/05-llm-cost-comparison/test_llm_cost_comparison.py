@@ -614,6 +614,21 @@ def test_fetch_fx_rate_returns_none_on_failure(monkeypatch):
     assert m.fetch_fx_rate("GBP", "USD") is None
 
 
+def test_fetch_fx_rate_falls_back_to_next_provider(monkeypatch):
+    body = json.dumps({"rates": {"USD": 1.3}}).encode("utf-8")
+    calls = []
+
+    def fake_urlopen(url, timeout=None):
+        calls.append(url)
+        if "frankfurter" in url:
+            raise OSError("blocked")
+        return _FakeHTTPResponse(body)
+
+    monkeypatch.setattr(m.urllib.request, "urlopen", fake_urlopen)
+    assert m.fetch_fx_rate("GBP", "USD") == pytest.approx(1.3)
+    assert len(calls) == 3
+
+
 # --------------------------------------------------------------------------
 # prompt_float minimum enforcement
 # --------------------------------------------------------------------------
