@@ -69,6 +69,40 @@ def test_hours_needed_for_workload_rejects_nonpositive_rate():
         m.hours_needed_for_workload(1000, 0)
 
 
+# --------------------------------------------------------------------------
+# Scaling a workload to what local throughput can actually produce
+# --------------------------------------------------------------------------
+
+
+def test_scale_workload_to_local_capacity_unchanged_when_feasible():
+    w = m.Workload(requests_per_day=100, avg_input_tokens=500, avg_output_tokens=300)
+    effective, feasible, coverage_pct = m.scale_workload_to_local_capacity(
+        w, tokens_per_sec=1000
+    )
+    assert effective is w
+    assert feasible is True
+    assert coverage_pct == pytest.approx(100.0)
+
+
+def test_scale_workload_to_local_capacity_scales_down_when_infeasible():
+    # 500 req/day * 4800 tokens/req * 30 days = 72,000,000 tokens/month.
+    # At 10 tok/s, that needs 72e6/(10*3600) = 2000 hours — 720 exist in a
+    # month, so coverage = 720/2000 = 36%.
+    w = m.Workload(requests_per_day=500, avg_input_tokens=4000, avg_output_tokens=800)
+    effective, feasible, coverage_pct = m.scale_workload_to_local_capacity(
+        w, tokens_per_sec=10
+    )
+    assert feasible is False
+    assert coverage_pct == pytest.approx(36.0)
+    assert effective.requests_per_day == pytest.approx(500 * 0.36)
+    # Same average input/output tokens per request — only volume scales.
+    assert effective.avg_input_tokens == 4000
+    assert effective.avg_output_tokens == 800
+    # The scaled workload should now be exactly at the feasibility boundary.
+    hours_needed = m.hours_needed_for_workload(effective.monthly_total_tokens, 10)
+    assert hours_needed == pytest.approx(m.HOURS_PER_MONTH)
+
+
 def test_local_monthly_cost_owned_splits_fixed_and_variable():
     # $3600 hardware / 3 years -> $100/month fixed, regardless of usage
     cost_idle = m.local_monthly_cost_owned(
@@ -137,8 +171,10 @@ def test_build_local_row_owned():
 
 def test_build_local_row_flags_when_throughput_cannot_keep_up_in_real_time():
     # A huge workload against a slow tokens/sec needs more compute-hours than
-    # exist in a month — the cost is still computed, but must say so plainly
-    # rather than presenting an unattainable number as an ordinary monthly bill.
+    # exist in a month (720). The cost is still real — it's what running
+    # flat-out, 24/7, all month would cost — but the notes must say plainly
+    # that this only covers part of the workload rather than implying the
+    # full requested volume was delivered for that price.
     w = m.Workload(requests_per_day=50000, avg_input_tokens=500, avg_output_tokens=300)
     row = m.build_local_row(
         w,
@@ -147,9 +183,10 @@ def test_build_local_row_flags_when_throughput_cannot_keep_up_in_real_time():
         power_watts=100,
         electricity_rate_per_kwh=0.15,
     )
-    assert "needs ~" in row.notes
+    assert "covers only ~" in row.notes
     assert "x this throughput" in row.notes
     assert row.feasible is False
+    assert row.monthly_cost > 0
 
 
 def test_build_local_row_no_warning_when_throughput_is_sufficient():
@@ -302,10 +339,11 @@ def test_render_table_never_picks_infeasible_row_as_cheapest():
     assert table.index("Real option") < table.index("Cheap but infeasible")
 
 
-def test_render_table_shows_no_cost_or_cheapest_line_when_all_infeasible():
-    # Nothing here has a real monthly bill to quote, so there's no "cheapest"
-    # to declare — declaring one from fictional extrapolated numbers would be
-    # exactly the misleading behavior this table is meant to avoid.
+def test_render_table_shows_no_cheapest_line_when_all_infeasible():
+    # Each row's cost is real (what running flat-out 24/7 would cost — see
+    # build_local_row), so it's still shown as a normal dollar figure. But
+    # with no row that fully covers the workload, there's no meaningful
+    # "cheapest full-replacement option" to declare.
     rows = [
         m.ComparisonRow(
             "A", monthly_cost=10.0, cost_per_million_tokens=1.0, feasible=False
@@ -316,8 +354,7 @@ def test_render_table_shows_no_cost_or_cheapest_line_when_all_infeasible():
     ]
     table = m.render_table(rows)
     assert "Cheapest:" not in table
-    assert table.count(m.NOT_FEASIBLE_COST) == 2
-    assert "$10.00" not in table and "$5.00" not in table
+    assert "$10.00" in table and "$5.00" in table
 
 
 def test_render_table_gbp_currency_uses_pound_symbol():
@@ -347,7 +384,12 @@ def test_render_combined_table_is_one_matrix_with_a_column_per_scenario():
     assert "$1.00" in report  # shared $/1M tokens column, shown once
 
 
-def test_render_combined_table_shows_n_a_instead_of_fictional_cost_for_infeasible_cells():
+def test_render_combined_table_shows_real_cost_for_infeasible_cells():
+    # A cell for a scenario the local option can't fully cover still shows
+    # its real cost (running flat-out 24/7 — see build_local_row), not a
+    # placeholder. Callers are expected to have already scaled such
+    # scenarios' workloads down to what the hardware can actually produce
+    # (see scale_workload_to_local_capacity) before building these rows.
     scenario_rows = [
         (
             "Casual",
@@ -373,9 +415,8 @@ def test_render_combined_table_shows_n_a_instead_of_fictional_cost_for_infeasibl
         ),
     ]
     report = m.render_combined_table(scenario_rows)
-    assert f"{m.NOT_FEASIBLE_COST}: needs more throughput" in report
-    assert "$100.00" not in report  # fictional extrapolated cost never shown
-    assert "$10.00" in report  # the feasible cell's real cost still is
+    assert "$100.00" in report
+    assert "$10.00" in report
 
 
 def test_render_combined_table_sorts_rows_by_per_million_rate_ascending():
@@ -444,13 +485,10 @@ def test_export_csv_and_json_use_currency_suffix(tmp_path: Path):
     assert data[0]["monthly_cost_gbp"] == 10.0
 
 
-def test_export_csv_and_json_write_n_a_for_infeasible_monthly_cost(tmp_path: Path):
-    # An infeasible row's monthly_cost is a fictional extrapolation past the
-    # hours that exist in a month (see build_local_row) — exporting the raw
-    # number would carry the same misleading "real bill" implication as
-    # printing it in a table, so it's written as n/a (CSV) / null (JSON)
-    # instead. cost_per_million_tokens is workload-independent and genuine
-    # regardless of feasibility, so it's still exported as a real number.
+def test_export_csv_and_json_export_real_cost_for_infeasible_rows(tmp_path: Path):
+    # An infeasible row's monthly_cost is real (the cost of running
+    # flat-out, 24/7, all month — see build_local_row), so it's exported
+    # as a normal number like any other row, not a placeholder.
     rows = [
         m.ComparisonRow(
             "Infeasible local", 999.0, 0.01, "note-infeasible", feasible=False
@@ -460,14 +498,13 @@ def test_export_csv_and_json_write_n_a_for_infeasible_monthly_cost(tmp_path: Pat
     csv_path = tmp_path / "out.csv"
     m.export_csv(rows, csv_path)
     csv_content = csv_path.read_text(encoding="utf-8")
-    assert "999.0000" not in csv_content
-    assert "n/a" in csv_content
+    assert "999.0000" in csv_content
     assert "0.0100" in csv_content
 
     json_path = tmp_path / "out.json"
     m.export_json(rows, json_path)
     data = json.loads(json_path.read_text(encoding="utf-8"))
-    assert data[0]["monthly_cost_usd"] is None
+    assert data[0]["monthly_cost_usd"] == 999.0
     assert data[0]["cost_per_million_tokens_usd"] == 0.01
 
 

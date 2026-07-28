@@ -121,20 +121,21 @@ requests/day and token counts behind each one.
     just the local electricity figure.
   - The non-interactive config still takes a single `power_watts` — pick
     whichever basis applies to your situation.
-- **Feasibility check**: if the workload needs more compute-hours per month
-  than actually exist in a month (a slow local setup can't keep up with a
-  high-volume workload in real time), the monthly-cost column shows `n/a`
-  instead of a dollar figure, both on screen and in CSV/JSON exports. That
-  number would otherwise be a straight-line extrapolation past the hours
-  that physically exist in a month — e.g. "£1,590/month" for a laptop that
-  would need to run 62 months' worth of hours in one month, which can read
-  as a real bill (and can even look like it costs more per month than the
-  hardware would cost to buy outright) when it isn't one. The `$/1M tokens`
-  rate is still shown and still real even when infeasible: it's
-  workload-independent (monthly cost scales with tokens, so the ratio
-  doesn't), so it's a genuine per-token rate regardless of whether the
-  workload's total volume is achievable. An infeasible option is also never
-  ranked as "cheapest".
+- **When local can't keep up**: if the workload needs more compute-hours per
+  month than actually exist in a month (a slow local setup can't keep up
+  with a high-volume workload in real time), the *whole scenario* — local
+  **and** hosted rows alike — is scaled down to what the hardware could
+  actually produce running flat-out, 24/7, all month (a real 720-hour
+  ceiling), rather than pricing hosted providers against the full requested
+  volume while local can only ever deliver a fraction of it. A banner above
+  the results names which scenarios were scaled and by how much (e.g.
+  "scaled to 25% of its original traffic"), so every dollar figure in the
+  table stays real and directly comparable — no straight-line
+  extrapolation past hours that don't exist in a month (which would
+  otherwise read as a real bill, and could even look like it costs more per
+  month than the hardware would cost to buy outright). An option that can't
+  fully cover the *original*, unscaled workload is still never ranked as
+  "cheapest".
 - **Local — buying new hardware** (`own` mode): split into a *fixed* monthly
   cost (hardware price amortized over its expected lifetime — it ages
   whether it's busy or not) plus the same *variable* electricity cost as

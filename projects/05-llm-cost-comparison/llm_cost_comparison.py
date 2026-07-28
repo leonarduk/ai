@@ -221,6 +221,43 @@ def hours_needed_for_workload(
     return total_monthly_tokens / tokens_per_hour
 
 
+def scale_workload_to_local_capacity(
+    workload: Workload, tokens_per_sec: float
+) -> tuple:
+    """Scale a workload down to what local throughput can produce in a real month.
+
+    Pricing hosted providers against a workload's full requested volume
+    while the local option can only ever produce a fraction of it (running
+    flat-out, 24/7, all month — see ``build_local_row``) isn't an
+    apples-to-apples comparison: it prices cloud for more work than the
+    local machine could ever do, so the two monthly-cost columns aren't
+    answering the same question. Scaling every option — local and hosted
+    alike — to the same, real, achievable token volume makes every option's
+    monthly figure directly comparable.
+
+    Returns ``(effective_workload, feasible, coverage_pct)``. If
+    ``tokens_per_sec`` can produce the workload's full monthly token total
+    within ``HOURS_PER_MONTH``, returns the workload unchanged with
+    ``feasible=True`` and ``coverage_pct=100.0``. Otherwise scales
+    ``requests_per_day`` down (keeping the same average input/output token
+    ratio per request, so it's still "the same kind of workload", just
+    fewer requests/day) to what the hardware could actually produce, and
+    returns ``feasible=False`` with the resulting coverage percentage.
+    """
+    hours_needed = hours_needed_for_workload(
+        workload.monthly_total_tokens, tokens_per_sec
+    )
+    if hours_needed <= HOURS_PER_MONTH:
+        return workload, True, 100.0
+    coverage = HOURS_PER_MONTH / hours_needed
+    scaled = Workload(
+        requests_per_day=workload.requests_per_day * coverage,
+        avg_input_tokens=workload.avg_input_tokens,
+        avg_output_tokens=workload.avg_output_tokens,
+    )
+    return scaled, False, coverage * 100.0
+
+
 def local_monthly_cost_owned(
     hardware_cost: float,
     lifetime_years: float,
@@ -314,34 +351,64 @@ def build_local_row(
     hourly_rate: float = 0.0,
     name: Optional[str] = None,
 ) -> ComparisonRow:
+    """Build a local-option row, costed for what the hardware can actually do.
+
+    ``hours_needed`` is how long this workload's tokens would take to
+    generate at ``tokens_per_sec``. When that exceeds ``HOURS_PER_MONTH``
+    (a real month only has 720 hours), the hardware physically cannot
+    produce the whole workload in real time — but running it flat-out,
+    24/7, all month, *is* a real, payable scenario (the machine simply
+    isn't idle), so the cost is computed for ``effective_hours`` (capped at
+    ``HOURS_PER_MONTH``) rather than for the uncapped ``hours_needed``.
+    Capping avoids a straight-line extrapolation past hours that don't
+    exist in a month, which would otherwise read as a real bill for
+    something physically impossible (e.g. "costs more per month than the
+    hardware itself would cost to buy"). ``cost_per_million_tokens`` is
+    computed against the tokens actually produced in ``effective_hours``,
+    not the workload's full requested total, so the $/1M rate stays the
+    same real, hours-independent per-token figure either way — it's only
+    the "does this option fully replace hosted for this workload" question
+    that ``feasible`` still answers, and infeasible rows are still never
+    ranked as "cheapest" (see ``render_table``).
+    """
     hours_needed = hours_needed_for_workload(
         workload.monthly_total_tokens, tokens_per_sec
     )
+    feasible = hours_needed <= HOURS_PER_MONTH
+    effective_hours = min(hours_needed, HOURS_PER_MONTH)
     if mode == "own":
         monthly_cost = local_monthly_cost_owned(
             hardware_cost,
             lifetime_years,
             power_watts,
             electricity_rate_per_kwh,
-            hours_needed,
+            effective_hours,
         )
         name = name or "Local (buying new hardware)"
     elif mode == "existing":
         monthly_cost = local_monthly_cost_existing_hardware(
-            power_watts, electricity_rate_per_kwh, hours_needed
+            power_watts, electricity_rate_per_kwh, effective_hours
         )
         name = name or "Local (electricity only — hardware already owned)"
     elif mode == "rent":
-        monthly_cost = local_monthly_cost_rented(hourly_rate, hours_needed)
+        monthly_cost = local_monthly_cost_rented(hourly_rate, effective_hours)
         name = "Local (rented cloud GPU)"
     else:
         raise ValueError(f"Unknown local cost mode: {mode!r}")
-    per_million = cost_per_million_tokens(monthly_cost, workload.monthly_total_tokens)
-    notes = f"~{hours_needed:.1f} compute-hrs/month at {tokens_per_sec:.1f} tok/s"
-    feasible = hours_needed <= HOURS_PER_MONTH
-    if not feasible:
+    tokens_produced = tokens_per_sec * 3600 * effective_hours
+    per_million = cost_per_million_tokens(monthly_cost, tokens_produced)
+    if feasible:
+        notes = (
+            f"~{effective_hours:.1f} compute-hrs/month at {tokens_per_sec:.1f} tok/s"
+        )
+    else:
+        coverage_pct = effective_hours / hours_needed * 100
         parallel_needed = hours_needed / HOURS_PER_MONTH
-        notes += f" — ⚠️ needs ~{parallel_needed:.1f}x this throughput to keep up"
+        notes = (
+            f"running 24/7 all month at {tokens_per_sec:.1f} tok/s covers only "
+            f"~{coverage_pct:.0f}% of this workload's tokens — would need "
+            f"~{parallel_needed:.1f}x this throughput to fully replace hosted"
+        )
     return ComparisonRow(name, monthly_cost, per_million, notes, feasible=feasible)
 
 
@@ -397,23 +464,15 @@ def convert_rows_currency(rows: list, usd_per_gbp: float) -> list:
     ]
 
 
-NOT_FEASIBLE_COST = "n/a"
-
-
 def render_table(rows: list, currency: str = "USD") -> str:
     """Render comparison rows as a plain-text table, cheapest first.
 
     Infeasible rows (``feasible=False`` — a local option whose throughput
-    can't keep up with the workload in real time) are sorted to the bottom
-    and their "Monthly cost" cell reads ``n/a`` rather than a dollar figure.
-    ``build_local_row`` still computes a real number internally (linearly
-    extrapolating hours needed past the hours that exist in a month), but
-    printing that as a currency amount reads as a real bill for something
-    physically impossible — e.g. "£1,590/month" for a laptop that would need
-    to run 62 months' worth of hours in one month. The ``$/1M tokens`` rate
-    is still shown and still real: it's workload-independent (cost scales
-    with tokens, so the ratio doesn't), so it's a genuine per-token rate
-    regardless of whether the workload's total volume is achievable.
+    can't produce this workload's full token volume within a real month)
+    are sorted to the bottom and never picked as "cheapest": their cost is
+    real (see ``build_local_row`` — it's the cost of running flat-out, 24/7,
+    all month), but it only covers part of the workload, so ranking it
+    against options that fully cover the workload would be misleading.
     """
     if not rows:
         return "(no rows to display)"
@@ -421,7 +480,7 @@ def render_table(rows: list, currency: str = "USD") -> str:
     rows_sorted = sorted(rows, key=lambda r: (not r.feasible, r.monthly_cost))
 
     def cost_cell(r: ComparisonRow) -> str:
-        return f"{symbol}{r.monthly_cost:,.2f}" if r.feasible else NOT_FEASIBLE_COST
+        return f"{symbol}{r.monthly_cost:,.2f}"
 
     name_w = max(len("Option"), max(len(r.name) for r in rows_sorted))
     cost_w = max(len("Monthly cost"), max(len(cost_cell(r)) for r in rows_sorted))
@@ -471,12 +530,11 @@ def render_combined_table(scenario_rows: list, currency: str = "USD") -> str:
     A single "$/1M tokens" column plus one cost column per scenario shows
     that directly instead of repeating the same rate in every section.
 
-    A cell for a local option whose throughput can't keep up with that
-    scenario's workload (see ``build_local_row``) reads ``n/a`` instead of a
-    dollar figure — that number would be a linear extrapolation past the
-    hours that actually exist in a month (e.g. "needs 62x this throughput"),
-    and printing it as a currency amount reads as a real bill for something
-    physically impossible. A single footnote explains why.
+    Every cost here is real: a scenario whose local throughput can't keep up
+    with the requested traffic should already have had its workload scaled
+    down to what the hardware can actually produce running 24/7 (see
+    ``scale_workload_to_local_capacity``) before its rows were built here,
+    so local and hosted costs both reflect the same achievable token volume.
 
     ``scenario_rows`` is a list of ``(scenario_label, rows)`` pairs. Rows are
     matched across scenarios by name; row order (and $/1M tokens value) is
@@ -490,16 +548,12 @@ def render_combined_table(scenario_rows: list, currency: str = "USD") -> str:
     row_order = []
     per_million_by_name = {}
     cost_by_name_and_scenario = {}
-    feasible_by_name_and_scenario = {}
-    any_infeasible = False
     for label, rows in scenario_rows:
         for r in rows:
             if r.name not in per_million_by_name:
                 row_order.append(r.name)
                 per_million_by_name[r.name] = r.cost_per_million_tokens
             cost_by_name_and_scenario[(r.name, label)] = r.monthly_cost
-            feasible_by_name_and_scenario[(r.name, label)] = r.feasible
-            any_infeasible = any_infeasible or not r.feasible
 
     row_order.sort(key=lambda name: per_million_by_name[name])
     scenario_labels = [label for label, _rows in scenario_rows]
@@ -511,8 +565,6 @@ def render_combined_table(scenario_rows: list, currency: str = "USD") -> str:
         key = (name, label)
         if key not in cost_by_name_and_scenario:
             return "-"
-        if not feasible_by_name_and_scenario[key]:
-            return NOT_FEASIBLE_COST
         return fmt(cost_by_name_and_scenario[key])
 
     name_w = max(len("Option"), max(len(n) for n in row_order))
@@ -537,31 +589,7 @@ def render_combined_table(scenario_rows: list, currency: str = "USD") -> str:
             line += f"  {cell_str(name, label):>{col_widths[label]}}"
         lines.append(line)
 
-    if any_infeasible:
-        lines.append("")
-        lines.append(
-            f"{NOT_FEASIBLE_COST}: needs more throughput than this machine has to "
-            "keep up 24/7 — no real monthly cost to quote"
-        )
     return "\n".join(lines)
-
-
-def _csv_cost_cell(r: ComparisonRow) -> str:
-    """CSV monthly-cost cell: the real figure if feasible, else ``n/a``.
-
-    An infeasible row's ``monthly_cost`` is a linear extrapolation past the
-    compute-hours that actually exist in a month (see ``build_local_row``) —
-    writing that number to an export is exactly as misleading as printing it
-    in a table; it can read as a real bill for something physically
-    impossible (e.g. costing more per month than the hardware itself would
-    cost to buy outright).
-    """
-    return f"{r.monthly_cost:.4f}" if r.feasible else NOT_FEASIBLE_COST
-
-
-def _json_cost_cell(r: ComparisonRow):
-    """JSON monthly-cost value: the real figure if feasible, else ``None``."""
-    return round(r.monthly_cost, 4) if r.feasible else None
 
 
 def export_csv(rows: list, path: Path, currency: str = "USD") -> None:
@@ -580,7 +608,7 @@ def export_csv(rows: list, path: Path, currency: str = "USD") -> None:
             writer.writerow(
                 [
                     r.name,
-                    _csv_cost_cell(r),
+                    f"{r.monthly_cost:.4f}",
                     f"{r.cost_per_million_tokens:.4f}",
                     r.notes,
                 ]
@@ -592,7 +620,7 @@ def export_json(rows: list, path: Path, currency: str = "USD") -> None:
     data = [
         {
             "option": r.name,
-            f"monthly_cost_{suffix}": _json_cost_cell(r),
+            f"monthly_cost_{suffix}": round(r.monthly_cost, 4),
             f"cost_per_million_tokens_{suffix}": round(r.cost_per_million_tokens, 4),
             "notes": r.notes,
         }
@@ -622,7 +650,7 @@ def export_combined_csv(scenario_rows: list, path: Path, currency: str = "USD") 
                     [
                         label,
                         r.name,
-                        _csv_cost_cell(r),
+                        f"{r.monthly_cost:.4f}",
                         f"{r.cost_per_million_tokens:.4f}",
                         r.notes,
                     ]
@@ -638,7 +666,7 @@ def export_combined_json(
         {
             "scenario": label,
             "option": r.name,
-            f"monthly_cost_{suffix}": _json_cost_cell(r),
+            f"monthly_cost_{suffix}": round(r.monthly_cost, 4),
             f"cost_per_million_tokens_{suffix}": round(r.cost_per_million_tokens, 4),
             "notes": r.notes,
         }
@@ -1162,11 +1190,15 @@ def interactive_workload() -> list:
 
 
 def interactive_local_setup() -> tuple:
-    """Returns ``(row_builder, display_currency, usd_per_gbp)``.
+    """Returns ``(row_builder, display_currency, usd_per_gbp, tokens_per_sec)``.
 
     ``display_currency`` is ``"GBP"`` only when the user chose to pay
     electricity in GBP in ``"existing"`` mode; ``usd_per_gbp`` is the rate to
     convert the whole comparison table to GBP for display (None otherwise).
+    ``tokens_per_sec`` is returned alongside the builder so the caller can
+    scale each scenario's workload to what this throughput can actually
+    produce (see ``scale_workload_to_local_capacity``) before pricing both
+    local and hosted rows against it.
     """
     print("\n== Local setup ==")
     gpu_info = None
@@ -1279,6 +1311,7 @@ def interactive_local_setup() -> tuple:
             ],
             "USD",
             None,
+            tokens_per_sec,
         )
     elif mode == "existing":
         idle_draw = gpu_info.get("power_draw_w") if gpu_info else None
@@ -1405,7 +1438,7 @@ def interactive_local_setup() -> tuple:
                 ),
             ]
 
-        return build_existing_rows, display_currency, usd_per_gbp
+        return build_existing_rows, display_currency, usd_per_gbp, tokens_per_sec
     else:
         hourly_rate = prompt_float(
             "Rented GPU hourly rate (USD/hr)", default=2.50, minimum=0
@@ -1418,6 +1451,7 @@ def interactive_local_setup() -> tuple:
             ],
             "USD",
             None,
+            tokens_per_sec,
         )
 
 
@@ -1445,16 +1479,34 @@ def run_interactive() -> int:
     print(f"Hosted pricing as of {as_of}. {note}\n")
 
     scenarios = interactive_workload()
-    local_row_builder, display_currency, usd_per_gbp = interactive_local_setup()
+    local_row_builder, display_currency, usd_per_gbp, tokens_per_sec = (
+        interactive_local_setup()
+    )
     selected = interactive_provider_selection(pricing)
 
     scenario_rows = {}
+    scaled_scenarios = []
     for key, label, workload in scenarios:
-        rows = list(local_row_builder(workload))
-        rows.extend(build_hosted_rows(workload, pricing, selected))
+        effective_workload, feasible, coverage_pct = scale_workload_to_local_capacity(
+            workload, tokens_per_sec
+        )
+        if not feasible:
+            scaled_scenarios.append((label, coverage_pct))
+        rows = list(local_row_builder(effective_workload))
+        rows.extend(build_hosted_rows(effective_workload, pricing, selected))
         if display_currency == "GBP":
             rows = convert_rows_currency(rows, usd_per_gbp)
-        scenario_rows[key] = (label, workload, rows)
+        scenario_rows[key] = (label, effective_workload, rows)
+
+    if scaled_scenarios:
+        print(
+            "\nNote: this local setup can't produce the full requested traffic "
+            "running 24/7 for every scenario below — figures for these are "
+            "scaled to what it can actually generate in a real month, so local "
+            "and hosted costs stay directly comparable:"
+        )
+        for label, coverage_pct in scaled_scenarios:
+            print(f"  - {label}: scaled to {coverage_pct:.0f}% of its original traffic")
 
     if len(scenario_rows) == 1:
         ((label, workload, rows),) = scenario_rows.values()
@@ -1734,9 +1786,27 @@ def run_non_interactive(
 
     multiple = len(scenarios) > 1
     scenario_labels_rows = []
+    scaled_scenarios = []
     for key, label, workload in scenarios:
-        rows = [build_local(workload)] + build_hosted_rows(workload, pricing, selected)
+        effective_workload, feasible, coverage_pct = scale_workload_to_local_capacity(
+            workload, tokens_per_sec
+        )
+        if not feasible:
+            scaled_scenarios.append((label, coverage_pct))
+        rows = [build_local(effective_workload)] + build_hosted_rows(
+            effective_workload, pricing, selected
+        )
         scenario_labels_rows.append((label, rows))
+
+    if scaled_scenarios:
+        print(
+            "Note: this local setup can't produce the full requested traffic "
+            "running 24/7 for every scenario below — figures for these are "
+            "scaled to what it can actually generate in a real month, so local "
+            "and hosted costs stay directly comparable:"
+        )
+        for label, coverage_pct in scaled_scenarios:
+            print(f"  - {label}: scaled to {coverage_pct:.0f}% of its original traffic")
 
     if export_fmt and export_path:
         if multiple:
