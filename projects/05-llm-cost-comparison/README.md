@@ -50,12 +50,13 @@ Walks through:
    hardware cost basis (see below).
 3. **Hosted providers** — pick which models from `pricing.json` to compare
    against, or compare against all of them.
-4. **Results** — one report combining every scenario you picked, each as its
-   own labeled, cheapest-first mini-table (so long scenario names and option
-   names don't force every column wide, the way a single flat table with a
-   repeated "Scenario" column would). Exporting writes one CSV/JSON file
-   with a `scenario` column, so a spreadsheet or script can still filter or
-   pivot across scenarios even though the console view keeps them separate.
+4. **Results** — if you picked more than one scenario, one matrix table: one
+   row per option, one column per scenario's monthly cost, plus a single
+   `$/1M tokens` column (that rate doesn't change with workload size, so
+   it's shown once instead of repeated per scenario). A single-scenario run
+   gets a plain cheapest-first table instead. Exporting writes one CSV/JSON
+   file with a `scenario` column either way, so a spreadsheet or script can
+   filter or pivot across scenarios.
 
 ### Non-interactive (scripting / CI)
 
@@ -117,9 +118,18 @@ requests/day and token counts behind each one.
     whichever basis applies to your situation.
 - **Feasibility check**: if the workload needs more compute-hours per month
   than actually exist in a month (a slow local setup can't keep up with a
-  high-volume workload in real time), the row's notes say so explicitly and
-  it's never ranked as "cheapest" — a number nobody can actually pay in
-  practice shouldn't win the comparison just because the arithmetic is small.
+  high-volume workload in real time), the monthly-cost column shows `n/a`
+  instead of a dollar figure, both on screen and in CSV/JSON exports. That
+  number would otherwise be a straight-line extrapolation past the hours
+  that physically exist in a month — e.g. "£1,590/month" for a laptop that
+  would need to run 62 months' worth of hours in one month, which can read
+  as a real bill (and can even look like it costs more per month than the
+  hardware would cost to buy outright) when it isn't one. The `$/1M tokens`
+  rate is still shown and still real even when infeasible: it's
+  workload-independent (monthly cost scales with tokens, so the ratio
+  doesn't), so it's a genuine per-token rate regardless of whether the
+  workload's total volume is achievable. An infeasible option is also never
+  ranked as "cheapest".
 - **Local — buying new hardware** (`own` mode): split into a *fixed* monthly
   cost (hardware price amortized over its expected lifetime — it ages
   whether it's busy or not) plus the same *variable* electricity cost as

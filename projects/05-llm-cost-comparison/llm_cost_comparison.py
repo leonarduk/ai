@@ -341,7 +341,7 @@ def build_local_row(
     feasible = hours_needed <= HOURS_PER_MONTH
     if not feasible:
         parallel_needed = hours_needed / HOURS_PER_MONTH
-        notes += f" — ⚠️ needs ~{parallel_needed:.1f}x this throughput to keep up (not a real 24/7 cost)"
+        notes += f" — ⚠️ needs ~{parallel_needed:.1f}x this throughput to keep up"
     return ComparisonRow(name, monthly_cost, per_million, notes, feasible=feasible)
 
 
@@ -397,23 +397,34 @@ def convert_rows_currency(rows: list, usd_per_gbp: float) -> list:
     ]
 
 
+NOT_FEASIBLE_COST = "n/a"
+
+
 def render_table(rows: list, currency: str = "USD") -> str:
     """Render comparison rows as a plain-text table, cheapest first.
 
     Infeasible rows (``feasible=False`` — a local option whose throughput
     can't keep up with the workload in real time) are sorted to the bottom
-    regardless of their dollar figure, and never count as "cheapest": that
-    honor would be nonsense for a number nobody can actually pay in practice.
+    and their "Monthly cost" cell reads ``n/a`` rather than a dollar figure.
+    ``build_local_row`` still computes a real number internally (linearly
+    extrapolating hours needed past the hours that exist in a month), but
+    printing that as a currency amount reads as a real bill for something
+    physically impossible — e.g. "£1,590/month" for a laptop that would need
+    to run 62 months' worth of hours in one month. The ``$/1M tokens`` rate
+    is still shown and still real: it's workload-independent (cost scales
+    with tokens, so the ratio doesn't), so it's a genuine per-token rate
+    regardless of whether the workload's total volume is achievable.
     """
     if not rows:
         return "(no rows to display)"
     symbol = CURRENCY_SYMBOLS.get(currency, currency + " ")
     rows_sorted = sorted(rows, key=lambda r: (not r.feasible, r.monthly_cost))
+
+    def cost_cell(r: ComparisonRow) -> str:
+        return f"{symbol}{r.monthly_cost:,.2f}" if r.feasible else NOT_FEASIBLE_COST
+
     name_w = max(len("Option"), max(len(r.name) for r in rows_sorted))
-    cost_w = max(
-        len("Monthly cost"),
-        max(len(f"{symbol}{r.monthly_cost:,.2f}") for r in rows_sorted),
-    )
+    cost_w = max(len("Monthly cost"), max(len(cost_cell(r)) for r in rows_sorted))
     per_m_w = max(
         len(f"{symbol}/1M tokens"),
         max(len(f"{symbol}{r.cost_per_million_tokens:,.2f}") for r in rows_sorted),
@@ -424,52 +435,133 @@ def render_table(rows: list, currency: str = "USD") -> str:
     )
     lines = [header, "-" * len(header)]
     for r in rows_sorted:
-        cost_s = f"{symbol}{r.monthly_cost:,.2f}"
+        cost_s = cost_cell(r)
         per_m_s = f"{symbol}{r.cost_per_million_tokens:,.2f}"
         lines.append(
             f"{r.name:<{name_w}}  {cost_s:>{cost_w}}  {per_m_s:>{per_m_w}}  {r.notes}"
         )
     feasible_rows = [r for r in rows_sorted if r.feasible]
-    cheapest = (
-        min(feasible_rows, key=lambda r: r.monthly_cost)
-        if feasible_rows
-        else rows_sorted[0]
-    )
-    most_expensive = max(rows_sorted, key=lambda r: r.monthly_cost)
-    if (
-        len(rows_sorted) > 1
-        and most_expensive.monthly_cost > 0
-        and cheapest.monthly_cost > 0
-    ):
-        multiple = most_expensive.monthly_cost / cheapest.monthly_cost
+    if len(feasible_rows) > 1:
+        cheapest = min(feasible_rows, key=lambda r: r.monthly_cost)
+        most_expensive = max(feasible_rows, key=lambda r: r.monthly_cost)
+        if most_expensive.monthly_cost > 0 and cheapest.monthly_cost > 0:
+            multiple = most_expensive.monthly_cost / cheapest.monthly_cost
+            lines.append("")
+            lines.append(
+                f"Cheapest: {cheapest.name} — most expensive option is {multiple:.1f}x its cost."
+            )
+    elif len(feasible_rows) == 1 and len(rows_sorted) > 1:
         lines.append("")
-        lines.append(
-            f"Cheapest: {cheapest.name} — most expensive option is {multiple:.1f}x its cost."
-        )
+        lines.append(f"Cheapest: {feasible_rows[0].name} (only feasible option).")
     return "\n".join(lines)
 
 
 def render_combined_table(scenario_rows: list, currency: str = "USD") -> str:
-    """Render several scenarios as one report: a labeled mini-table per
-    scenario, one after another, rather than a single flat table with the
-    scenario name repeated on every row.
+    """Render several scenarios as one matrix: one row per option, one
+    column per scenario's monthly cost, plus a single "$/1M tokens" column.
 
-    A flat table with a "Scenario" column looked fine for two scenarios but
-    became unreadable at five: every column had to widen to fit the longest
-    scenario name repeated dozens of times, and long option names like
-    "Production customer-facing app" made rows wrap badly in a normal
-    terminal width. Separate labeled sections read like a report instead of
-    a spreadsheet dumped to a console.
+    A separate mini-table per scenario (tried first) got unreadable past two
+    or three scenarios — the same options repeated in full every time, just
+    to show different monthly totals. A flat table with a repeated
+    "Scenario" column (tried before that) was worse still: long scenario and
+    option names forced every column to widen to fit the longest repeated
+    value. Both approaches also obscured a fact worth surfacing: an option's
+    $/1M-tokens rate does not vary with workload size (monthly cost scales
+    with tokens, so the ratio is constant) — only the monthly total does.
+    A single "$/1M tokens" column plus one cost column per scenario shows
+    that directly instead of repeating the same rate in every section.
 
-    ``scenario_rows`` is a list of ``(scenario_label, rows)`` pairs.
+    A cell for a local option whose throughput can't keep up with that
+    scenario's workload (see ``build_local_row``) reads ``n/a`` instead of a
+    dollar figure — that number would be a linear extrapolation past the
+    hours that actually exist in a month (e.g. "needs 62x this throughput"),
+    and printing it as a currency amount reads as a real bill for something
+    physically impossible. A single footnote explains why.
+
+    ``scenario_rows`` is a list of ``(scenario_label, rows)`` pairs. Rows are
+    matched across scenarios by name; row order (and $/1M tokens value) is
+    taken from whichever scenario each name first appears in, then the
+    matrix is sorted by that rate ascending.
     """
     if not scenario_rows:
         return "(no rows to display)"
-    sections = []
+    symbol = CURRENCY_SYMBOLS.get(currency, currency + " ")
+
+    row_order = []
+    per_million_by_name = {}
+    cost_by_name_and_scenario = {}
+    feasible_by_name_and_scenario = {}
+    any_infeasible = False
     for label, rows in scenario_rows:
-        sections.append(f"-- {label} --")
-        sections.append(render_table(rows, currency=currency))
-    return "\n\n".join(sections)
+        for r in rows:
+            if r.name not in per_million_by_name:
+                row_order.append(r.name)
+                per_million_by_name[r.name] = r.cost_per_million_tokens
+            cost_by_name_and_scenario[(r.name, label)] = r.monthly_cost
+            feasible_by_name_and_scenario[(r.name, label)] = r.feasible
+            any_infeasible = any_infeasible or not r.feasible
+
+    row_order.sort(key=lambda name: per_million_by_name[name])
+    scenario_labels = [label for label, _rows in scenario_rows]
+
+    def fmt(value: float) -> str:
+        return f"{symbol}{value:,.2f}"
+
+    def cell_str(name: str, label: str) -> str:
+        key = (name, label)
+        if key not in cost_by_name_and_scenario:
+            return "-"
+        if not feasible_by_name_and_scenario[key]:
+            return NOT_FEASIBLE_COST
+        return fmt(cost_by_name_and_scenario[key])
+
+    name_w = max(len("Option"), max(len(n) for n in row_order))
+    per_m_header = symbol + "/1M tokens"
+    per_m_w = max(
+        len(per_m_header),
+        max(len(fmt(per_million_by_name[n])) for n in row_order),
+    )
+    col_widths = {
+        label: max([len(label)] + [len(cell_str(n, label)) for n in row_order])
+        for label in scenario_labels
+    }
+
+    header = f"{'Option':<{name_w}}  {per_m_header:>{per_m_w}}"
+    for label in scenario_labels:
+        header += f"  {label:>{col_widths[label]}}"
+    lines = [header, "-" * len(header)]
+
+    for name in row_order:
+        line = f"{name:<{name_w}}  {fmt(per_million_by_name[name]):>{per_m_w}}"
+        for label in scenario_labels:
+            line += f"  {cell_str(name, label):>{col_widths[label]}}"
+        lines.append(line)
+
+    if any_infeasible:
+        lines.append("")
+        lines.append(
+            f"{NOT_FEASIBLE_COST}: needs more throughput than this machine has to "
+            "keep up 24/7 — no real monthly cost to quote"
+        )
+    return "\n".join(lines)
+
+
+def _csv_cost_cell(r: ComparisonRow) -> str:
+    """CSV monthly-cost cell: the real figure if feasible, else ``n/a``.
+
+    An infeasible row's ``monthly_cost`` is a linear extrapolation past the
+    compute-hours that actually exist in a month (see ``build_local_row``) —
+    writing that number to an export is exactly as misleading as printing it
+    in a table; it can read as a real bill for something physically
+    impossible (e.g. costing more per month than the hardware itself would
+    cost to buy outright).
+    """
+    return f"{r.monthly_cost:.4f}" if r.feasible else NOT_FEASIBLE_COST
+
+
+def _json_cost_cell(r: ComparisonRow):
+    """JSON monthly-cost value: the real figure if feasible, else ``None``."""
+    return round(r.monthly_cost, 4) if r.feasible else None
 
 
 def export_csv(rows: list, path: Path, currency: str = "USD") -> None:
@@ -488,7 +580,7 @@ def export_csv(rows: list, path: Path, currency: str = "USD") -> None:
             writer.writerow(
                 [
                     r.name,
-                    f"{r.monthly_cost:.4f}",
+                    _csv_cost_cell(r),
                     f"{r.cost_per_million_tokens:.4f}",
                     r.notes,
                 ]
@@ -500,7 +592,7 @@ def export_json(rows: list, path: Path, currency: str = "USD") -> None:
     data = [
         {
             "option": r.name,
-            f"monthly_cost_{suffix}": round(r.monthly_cost, 4),
+            f"monthly_cost_{suffix}": _json_cost_cell(r),
             f"cost_per_million_tokens_{suffix}": round(r.cost_per_million_tokens, 4),
             "notes": r.notes,
         }
@@ -530,7 +622,7 @@ def export_combined_csv(scenario_rows: list, path: Path, currency: str = "USD") 
                     [
                         label,
                         r.name,
-                        f"{r.monthly_cost:.4f}",
+                        _csv_cost_cell(r),
                         f"{r.cost_per_million_tokens:.4f}",
                         r.notes,
                     ]
@@ -546,7 +638,7 @@ def export_combined_json(
         {
             "scenario": label,
             "option": r.name,
-            f"monthly_cost_{suffix}": round(r.monthly_cost, 4),
+            f"monthly_cost_{suffix}": _json_cost_cell(r),
             f"cost_per_million_tokens_{suffix}": round(r.cost_per_million_tokens, 4),
             "notes": r.notes,
         }

@@ -302,7 +302,10 @@ def test_render_table_never_picks_infeasible_row_as_cheapest():
     assert table.index("Real option") < table.index("Cheap but infeasible")
 
 
-def test_render_table_falls_back_to_cheapest_overall_if_all_infeasible():
+def test_render_table_shows_no_cost_or_cheapest_line_when_all_infeasible():
+    # Nothing here has a real monthly bill to quote, so there's no "cheapest"
+    # to declare — declaring one from fictional extrapolated numbers would be
+    # exactly the misleading behavior this table is meant to avoid.
     rows = [
         m.ComparisonRow(
             "A", monthly_cost=10.0, cost_per_million_tokens=1.0, feasible=False
@@ -312,7 +315,9 @@ def test_render_table_falls_back_to_cheapest_overall_if_all_infeasible():
         ),
     ]
     table = m.render_table(rows)
-    assert "Cheapest: B" in table
+    assert "Cheapest:" not in table
+    assert table.count(m.NOT_FEASIBLE_COST) == 2
+    assert "$10.00" not in table and "$5.00" not in table
 
 
 def test_render_table_gbp_currency_uses_pound_symbol():
@@ -322,7 +327,7 @@ def test_render_table_gbp_currency_uses_pound_symbol():
     assert "$" not in table
 
 
-def test_render_combined_table_sections_each_scenario_separately():
+def test_render_combined_table_is_one_matrix_with_a_column_per_scenario():
     scenario_rows = [
         (
             "Casual",
@@ -330,16 +335,65 @@ def test_render_combined_table_sections_each_scenario_separately():
         ),
         (
             "Production",
-            [m.ComparisonRow("Local", monthly_cost=100.0, cost_per_million_tokens=2.0)],
+            [m.ComparisonRow("Local", monthly_cost=100.0, cost_per_million_tokens=1.0)],
         ),
     ]
     report = m.render_combined_table(scenario_rows)
-    assert "-- Casual --" in report
-    assert "-- Production --" in report
-    assert report.index("-- Casual --") < report.index("-- Production --")
-    # Each scenario's own mini-table appears after its section header.
-    assert report.index("-- Casual --") < report.index("$10.00")
-    assert report.index("-- Production --") < report.index("$100.00")
+    # One row for the option, one column per scenario — not one section per
+    # scenario, and the $/1M rate (workload-independent) appears only once.
+    assert report.count("Local") == 1
+    assert "Casual" in report and "Production" in report
+    assert "$10.00" in report and "$100.00" in report
+    assert "$1.00" in report  # shared $/1M tokens column, shown once
+
+
+def test_render_combined_table_shows_n_a_instead_of_fictional_cost_for_infeasible_cells():
+    scenario_rows = [
+        (
+            "Casual",
+            [
+                m.ComparisonRow(
+                    "Local",
+                    monthly_cost=10.0,
+                    cost_per_million_tokens=1.0,
+                    feasible=True,
+                )
+            ],
+        ),
+        (
+            "Production",
+            [
+                m.ComparisonRow(
+                    "Local",
+                    monthly_cost=100.0,
+                    cost_per_million_tokens=1.0,
+                    feasible=False,
+                )
+            ],
+        ),
+    ]
+    report = m.render_combined_table(scenario_rows)
+    assert f"{m.NOT_FEASIBLE_COST}: needs more throughput" in report
+    assert "$100.00" not in report  # fictional extrapolated cost never shown
+    assert "$10.00" in report  # the feasible cell's real cost still is
+
+
+def test_render_combined_table_sorts_rows_by_per_million_rate_ascending():
+    scenario_rows = [
+        (
+            "Casual",
+            [
+                m.ComparisonRow(
+                    "Pricier per token", monthly_cost=5.0, cost_per_million_tokens=9.0
+                ),
+                m.ComparisonRow(
+                    "Cheaper per token", monthly_cost=50.0, cost_per_million_tokens=1.0
+                ),
+            ],
+        )
+    ]
+    report = m.render_combined_table(scenario_rows)
+    assert report.index("Cheaper per token") < report.index("Pricier per token")
 
 
 def test_render_combined_table_empty():
@@ -388,6 +442,33 @@ def test_export_csv_and_json_use_currency_suffix(tmp_path: Path):
     m.export_json(rows, json_path, currency="GBP")
     data = json.loads(json_path.read_text(encoding="utf-8"))
     assert data[0]["monthly_cost_gbp"] == 10.0
+
+
+def test_export_csv_and_json_write_n_a_for_infeasible_monthly_cost(tmp_path: Path):
+    # An infeasible row's monthly_cost is a fictional extrapolation past the
+    # hours that exist in a month (see build_local_row) — exporting the raw
+    # number would carry the same misleading "real bill" implication as
+    # printing it in a table, so it's written as n/a (CSV) / null (JSON)
+    # instead. cost_per_million_tokens is workload-independent and genuine
+    # regardless of feasibility, so it's still exported as a real number.
+    rows = [
+        m.ComparisonRow(
+            "Infeasible local", 999.0, 0.01, "note-infeasible", feasible=False
+        ),
+    ]
+
+    csv_path = tmp_path / "out.csv"
+    m.export_csv(rows, csv_path)
+    csv_content = csv_path.read_text(encoding="utf-8")
+    assert "999.0000" not in csv_content
+    assert "n/a" in csv_content
+    assert "0.0100" in csv_content
+
+    json_path = tmp_path / "out.json"
+    m.export_json(rows, json_path)
+    data = json.loads(json_path.read_text(encoding="utf-8"))
+    assert data[0]["monthly_cost_usd"] is None
+    assert data[0]["cost_per_million_tokens_usd"] == 0.01
 
 
 def test_export_combined_csv_and_json_include_scenario_column(tmp_path: Path):
@@ -1517,8 +1598,8 @@ def test_run_non_interactive_multiple_presets_prints_one_combined_table_and_expo
 
     assert exit_code == 0
     out = capsys.readouterr().out
-    assert "-- Casual personal use --" in out
-    assert "-- Autonomous coding agent --" in out
+    assert "Casual personal use" in out
+    assert "Autonomous coding agent" in out
     assert export_path.exists()
     data = json.loads(export_path.read_text(encoding="utf-8"))
     scenarios_seen = {row["scenario"] for row in data}
