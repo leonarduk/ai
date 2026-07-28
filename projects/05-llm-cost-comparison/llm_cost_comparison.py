@@ -865,6 +865,26 @@ def lookup_gpu_defaults(gpu_name: str) -> Optional[tuple]:
     return None
 
 
+DESKTOP_REST_OF_SYSTEM_W = 100.0
+LAPTOP_REST_OF_SYSTEM_W = 30.0
+
+
+def rest_of_system_allowance_w(gpu_info: Optional[dict]) -> float:
+    """Rough default allowance (W) for everything except the GPU itself —
+    CPU, RAM, storage, and, for a desktop, a separate PSU/motherboard/fans.
+
+    A laptop integrates all of that far more efficiently than a full-size
+    desktop tower (no discrete PSU, far lower-power CPU/board), so a single
+    flat number badly overshoots one form factor or undershoots the other.
+    ``nvidia-smi`` reports "... Laptop GPU" in the name for mobile parts,
+    which is the only signal available to tell them apart without extra
+    tooling — still just a starting point to override, not a measurement.
+    """
+    if gpu_info and "laptop" in gpu_info.get("name", "").lower():
+        return LAPTOP_REST_OF_SYSTEM_W
+    return DESKTOP_REST_OF_SYSTEM_W
+
+
 def format_gpu_summary(gpu_info: dict) -> str:
     """Render a detected GPU's info for display.
 
@@ -1300,11 +1320,25 @@ def interactive_local_setup() -> tuple:
         )
         # Rough allowance for the rest of the system (CPU, RAM, storage,
         # motherboard) beyond just the GPU, for when the whole machine's
-        # power is attributable to this use because it wouldn't otherwise be on.
+        # power is attributable to this use because it wouldn't otherwise be
+        # on. A laptop draws far less here than a desktop tower, so the
+        # allowance depends on the detected GPU's form factor rather than
+        # one flat number for both.
+        rest_of_system_w = rest_of_system_allowance_w(gpu_info)
+        form_factor = (
+            "laptop"
+            if gpu_info and "laptop" in gpu_info["name"].lower()
+            else "desktop (no GPU detected)" if not gpu_info else "desktop"
+        )
+        print(
+            f"  Assuming a {form_factor} rest-of-system allowance of "
+            f"{rest_of_system_w:.0f} W (CPU/RAM/storage, plus PSU/motherboard "
+            "for a desktop) — override below if yours differs."
+        )
         power_watts_total = prompt_float(
             "Total system power draw while running — GPU plus the rest of the PC "
             "(W), for when it's only powered on to run this",
-            default=power_watts_extra + 100.0,
+            default=power_watts_extra + rest_of_system_w,
             minimum=0,
         )
 

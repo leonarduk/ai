@@ -1434,6 +1434,30 @@ def test_lookup_gpu_defaults_case_insensitive():
 
 
 # --------------------------------------------------------------------------
+# Rest-of-system power allowance (laptop vs desktop)
+# --------------------------------------------------------------------------
+
+
+def test_rest_of_system_allowance_uses_laptop_default_for_laptop_gpu():
+    gpu_info = {"name": "NVIDIA GeForce RTX 5070 Laptop GPU"}
+    assert m.rest_of_system_allowance_w(gpu_info) == m.LAPTOP_REST_OF_SYSTEM_W
+
+
+def test_rest_of_system_allowance_uses_desktop_default_for_desktop_gpu():
+    gpu_info = {"name": "NVIDIA GeForce RTX 4090"}
+    assert m.rest_of_system_allowance_w(gpu_info) == m.DESKTOP_REST_OF_SYSTEM_W
+
+
+def test_rest_of_system_allowance_uses_desktop_default_when_no_gpu_detected():
+    assert m.rest_of_system_allowance_w(None) == m.DESKTOP_REST_OF_SYSTEM_W
+
+
+def test_rest_of_system_allowance_is_case_insensitive():
+    gpu_info = {"name": "nvidia geforce rtx 5070 laptop gpu"}
+    assert m.rest_of_system_allowance_w(gpu_info) == m.LAPTOP_REST_OF_SYSTEM_W
+
+
+# --------------------------------------------------------------------------
 # Local model discovery (mocked urllib — no real server needed)
 # --------------------------------------------------------------------------
 

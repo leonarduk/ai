@@ -105,8 +105,13 @@ requests/day and token counts behind each one.
     reading taken at GPU detection) instead of guessed.
   - *Machine only powered on to run this* → the **whole system's** draw
     while running, since the entire session's electricity is attributable
-    to this use (measured extra draw plus a fixed allowance for the rest of
-    the PC).
+    to this use (measured extra draw plus an allowance for the rest of the
+    PC — CPU, RAM, storage, and, for a desktop, a separate PSU/motherboard).
+    That allowance depends on the detected GPU's form factor rather than one
+    flat guess for both: a laptop integrates all of that far more
+    efficiently than a full desktop tower, so it defaults to 30 W instead of
+    100 W when `nvidia-smi` reports a "... Laptop GPU" name. Either way it's
+    still just a starting point — override it if yours differs.
   - Electricity rate can be entered in USD/kWh, or in GBP/kWh — including a
     live lookup of the current UK Octopus Agile unit rate. All cost math is
     still done internally in USD (hosted pricing is USD-denominated), using
