@@ -12,9 +12,14 @@ import pytest
 import requests
 
 import entry as entry_mod
+import robots as robots_mod
 import server
 import sources as sources_mod
 from store import PrizeDrawStore
+
+# Captured before the autouse allow_all_robots fixture patches robots_mod.is_allowed,
+# so tests exercising the real robots.txt-parsing logic can restore it.
+_real_robots_is_allowed = robots_mod.is_allowed
 
 
 @pytest.fixture(autouse=True)
@@ -25,6 +30,16 @@ def isolated_store(tmp_path, monkeypatch):
     server.set_store(store)
     yield store
     server.set_store(None)
+
+
+@pytest.fixture(autouse=True)
+def allow_all_robots(monkeypatch):
+    """Default every test to an allowed robots.txt check (no network).
+
+    Tests that specifically exercise robots.txt enforcement override this
+    with a real RobotFileParser or an explicit disallow, below.
+    """
+    monkeypatch.setattr(robots_mod, "is_allowed", lambda *args, **kwargs: True)
 
 
 def call(name: str, arguments: dict) -> dict:
@@ -77,7 +92,7 @@ def test_search_draws_rss_source_is_mocked(monkeypatch):
         def raise_for_status(self):
             return None
 
-    def fake_get(url, timeout):
+    def fake_get(url, headers, timeout):
         assert url == "https://example-competitions.test/feed.xml"
         return FakeResponse()
 
@@ -469,3 +484,90 @@ def test_guard_submission_raises_for_purchase_and_personal_data_together():
     message = str(exc_info.value)
     assert "purchase" in message.lower()
     assert "personal" in message.lower()
+
+
+# ---------------------------------------------------------------------------
+# robots.txt compliance
+# ---------------------------------------------------------------------------
+
+
+class _FakeRobotsResponse:
+    def __init__(self, text: str, status_code: int = 200):
+        self.text = text
+        self.status_code = status_code
+
+
+def test_robots_is_allowed_respects_disallow(monkeypatch):
+    monkeypatch.setattr(robots_mod, "is_allowed", _real_robots_is_allowed)
+    robots_mod.clear_cache()
+
+    def fake_get(url, timeout):
+        assert url == "https://example-competitions.test/robots.txt"
+        return _FakeRobotsResponse("User-agent: *\nDisallow: /private/\n")
+
+    monkeypatch.setattr(requests, "get", fake_get)
+
+    assert robots_mod.is_allowed(
+        "https://example-competitions.test/spa-break", "TestAgent/1.0"
+    )
+    assert not robots_mod.is_allowed(
+        "https://example-competitions.test/private/secret", "TestAgent/1.0"
+    )
+
+
+def test_robots_is_allowed_defaults_to_allow_when_fetch_fails(monkeypatch):
+    monkeypatch.setattr(robots_mod, "is_allowed", _real_robots_is_allowed)
+    robots_mod.clear_cache()
+
+    def fake_get(url, timeout):
+        raise requests.exceptions.ConnectionError("no route to host")
+
+    monkeypatch.setattr(requests, "get", fake_get)
+
+    assert robots_mod.is_allowed(
+        "https://example-competitions.test/spa-break", "TestAgent/1.0"
+    )
+
+
+def test_robots_is_allowed_defaults_to_allow_when_robots_txt_missing(monkeypatch):
+    monkeypatch.setattr(robots_mod, "is_allowed", _real_robots_is_allowed)
+    robots_mod.clear_cache()
+
+    def fake_get(url, timeout):
+        return _FakeRobotsResponse("Not Found", status_code=404)
+
+    monkeypatch.setattr(requests, "get", fake_get)
+
+    assert robots_mod.is_allowed(
+        "https://example-competitions.test/spa-break", "TestAgent/1.0"
+    )
+
+
+def test_parse_entry_page_blocked_by_robots_txt(monkeypatch):
+    monkeypatch.setattr(robots_mod, "is_allowed", lambda *args, **kwargs: False)
+
+    def fail_get(*args, **kwargs):
+        raise AssertionError("must not fetch a page robots.txt disallows")
+
+    monkeypatch.setattr(requests, "get", fail_get)
+
+    result = asyncio.run(
+        server.call_tool(
+            "parse_entry_page", {"url": "https://example-competitions.test/blocked"}
+        )
+    )
+    assert len(result) == 1
+    assert "robots.txt disallows" in result[0].text
+
+
+def test_search_draws_rss_blocked_by_robots_txt(monkeypatch):
+    monkeypatch.setattr(robots_mod, "is_allowed", lambda *args, **kwargs: False)
+
+    def fail_get(*args, **kwargs):
+        raise AssertionError("must not fetch a feed robots.txt disallows")
+
+    monkeypatch.setattr(requests, "get", fail_get)
+
+    result = asyncio.run(server.call_tool("search_draws", {"sources": ["example-rss"]}))
+    assert len(result) == 1
+    assert "robots.txt disallows" in result[0].text

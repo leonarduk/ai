@@ -23,7 +23,11 @@ from xml.etree.ElementTree import Element
 import defusedxml.ElementTree as ElementTree
 import requests
 
+import robots as robots_mod
+
 REQUEST_TIMEOUT_SECONDS = 10
+USER_AGENT = "Mozilla/5.0 (compatible; prize-draw-mcp-server/1.0)"
+RobotsDisallowedError = robots_mod.RobotsDisallowedError
 
 MOCK_AGGREGATOR_LISTINGS = [
     {
@@ -129,7 +133,14 @@ def _parse_rss(xml_text: str, source_name: str) -> list[dict]:
 
 
 def _poll_rss(source: dict, session: requests.Session) -> list[dict]:
-    response = session.get(source["url"], timeout=REQUEST_TIMEOUT_SECONDS)
+    url = source["url"]
+    if not robots_mod.is_allowed(url, USER_AGENT, session=session):
+        raise robots_mod.RobotsDisallowedError(
+            f"robots.txt disallows fetching {url} for {USER_AGENT!r}"
+        )
+    response = session.get(
+        url, headers={"User-Agent": USER_AGENT}, timeout=REQUEST_TIMEOUT_SECONDS
+    )
     response.raise_for_status()
     return _parse_rss(response.text, source["name"])
 

@@ -25,10 +25,13 @@ from mcp.server import Server
 from mcp.types import TextContent, Tool
 
 import entry as entry_mod
+import robots as robots_mod
 import sources as sources_mod
 from store import PrizeDrawStore, utcnow_iso
 
 REQUEST_TIMEOUT_SECONDS = 15
+USER_AGENT = "Mozilla/5.0 (compatible; prize-draw-mcp-server/1.0)"
+RobotsDisallowedError = robots_mod.RobotsDisallowedError
 
 
 def load_env() -> None:
@@ -299,7 +302,11 @@ def _handle_parse_entry_page(arguments: dict) -> list[TextContent]:
         status_code = 200
         content_type = "text/html"
     else:
-        headers = {"User-Agent": "Mozilla/5.0 (compatible; prize-draw-mcp-server/1.0)"}
+        if not robots_mod.is_allowed(url, USER_AGENT):
+            raise RobotsDisallowedError(
+                f"robots.txt disallows fetching {url} for {USER_AGENT!r}"
+            )
+        headers = {"User-Agent": USER_AGENT}
         response = requests.get(url, headers=headers, timeout=REQUEST_TIMEOUT_SECONDS)
         response.raise_for_status()
         html = response.text
@@ -512,6 +519,8 @@ async def call_tool(name: str, arguments: dict) -> list[TextContent]:
         if name == "check_log":
             return _handle_check_log(arguments)
         return [TextContent(type="text", text=f"Unknown tool: {name}")]
+    except RobotsDisallowedError as exc:
+        return [TextContent(type="text", text=f"Error: {str(exc)}")]
     except requests.exceptions.Timeout:
         return [TextContent(type="text", text="Error: Request timed out")]
     except requests.exceptions.HTTPError as exc:
