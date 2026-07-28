@@ -983,14 +983,27 @@ def interactive_local_setup() -> Callable[[Workload], list]:
         if measured_load_power_w is not None and idle_draw is not None:
             extra_default = max(measured_load_power_w - idle_draw, 0.0)
             print(
-                f"  Measured extra draw while generating (load {measured_load_power_w:.0f} W "
-                f"minus idle {idle_draw:.0f} W): {extra_default:.0f} W"
+                f"  Extra power draw estimate: {extra_default:.0f} W (measured: load "
+                f"{measured_load_power_w:.0f} W minus idle {idle_draw:.0f} W)"
             )
+        elif gpu_info:
+            gpu_defaults = lookup_gpu_defaults(gpu_info["name"])
+            if gpu_defaults:
+                _, typical_load_power = gpu_defaults
+                baseline_idle = idle_draw if idle_draw is not None else 0.0
+                extra_default = max(typical_load_power - baseline_idle, 0.0)
+                print(
+                    f"  Extra power draw estimate: {extra_default:.0f} W (calculated: "
+                    f"{gpu_info['name']}'s typical load power {typical_load_power:.0f} W "
+                    f"minus its current idle draw {baseline_idle:.0f} W — run the "
+                    f"benchmark for a measured value instead of this estimate)"
+                )
         if extra_default is None:
-            gpu_draw = None
-            if gpu_info:
-                gpu_draw = gpu_info.get("power_draw_w") or gpu_info.get("power_limit_w")
-            extra_default = gpu_draw if gpu_draw else 300.0
+            extra_default = 250.0
+            print(
+                f"  Extra power draw estimate: {extra_default:.0f} W (generic fallback — "
+                "no GPU detected and no benchmark run to measure from)"
+            )
 
         print(
             "\n  Both cost bases are shown below, since which applies depends on why the\n"
@@ -1013,7 +1026,7 @@ def interactive_local_setup() -> Callable[[Workload], list]:
         )
 
         electricity_rate = None
-        if prompt_yes_no("Do you pay for electricity in GBP (e.g. UK)?", default=False):
+        if prompt_yes_no("Do you pay for electricity in GBP (e.g. UK)?", default=True):
             gbp_rate = None
             if prompt_yes_no(
                 "Look up your current unit rate live from Octopus Agile?", default=True
