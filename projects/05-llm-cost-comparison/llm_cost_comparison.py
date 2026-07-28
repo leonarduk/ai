@@ -258,6 +258,36 @@ def scale_workload_to_local_capacity(
     return scaled, False, coverage * 100.0
 
 
+# Default input:output token ratio assumed when sizing the "local at maximum
+# capacity" comparison — matches the customary defaults used elsewhere for a
+# generic request (e.g. the old free-form workload entry). Only the ratio
+# matters here, not the absolute numbers: the comparison is sized from local
+# throughput, not from a request count.
+DEFAULT_AVG_INPUT_TOKENS = 500.0
+DEFAULT_AVG_OUTPUT_TOKENS = 300.0
+
+
+def local_max_capacity_workload(
+    tokens_per_sec: float,
+    avg_input_tokens: float = DEFAULT_AVG_INPUT_TOKENS,
+    avg_output_tokens: float = DEFAULT_AVG_OUTPUT_TOKENS,
+) -> Workload:
+    """Build the workload representing local hardware running flat-out, 24/7.
+
+    There's no "requests/day" to guess here — the comparison is sized
+    backwards from what the hardware can physically produce
+    (``tokens_per_sec`` for a full real month, ``HOURS_PER_MONTH``), not
+    from an assumed traffic level. An input:output token ratio is still
+    needed only because hosted providers price those at different rates,
+    so ``requests_per_day`` is solved for whatever value makes the
+    resulting ``Workload`` add up to that same total token count.
+    """
+    max_tokens_per_month = tokens_per_sec * 3600 * HOURS_PER_MONTH
+    tokens_per_request = avg_input_tokens + avg_output_tokens
+    requests_per_day = max_tokens_per_month / (DAYS_PER_MONTH * tokens_per_request)
+    return Workload(requests_per_day, avg_input_tokens, avg_output_tokens)
+
+
 def local_monthly_cost_owned(
     hardware_cost: float,
     lifetime_years: float,
@@ -1167,55 +1197,6 @@ def prompt_yes_no(prompt: str, default: bool = True) -> bool:
     return raw.startswith("y")
 
 
-def _prompt_custom_workload() -> Workload:
-    while True:
-        requests_per_day = prompt_float("Requests per day", default=1000, minimum=0)
-        avg_input = prompt_float(
-            "Average input tokens per request", default=500, minimum=0
-        )
-        avg_output = prompt_float(
-            "Average output tokens per request", default=300, minimum=0
-        )
-        workload = Workload(requests_per_day, avg_input, avg_output)
-        if workload.monthly_total_tokens > 0:
-            return workload
-        print(
-            "  That produces zero total tokens/month — set requests per day and at "
-            "least one of input/output tokens above zero. Let's try again."
-        )
-
-
-def interactive_workload() -> list:
-    """Prompt for one or more workload scenarios to compare.
-
-    Returns a list of ``(key, label, Workload)`` tuples — usually one, but
-    "compare all presets" returns one per preset so the caller can print (and
-    optionally export) a separate table per scenario.
-    """
-    print("\n== Workload ==")
-    print(
-        "How much traffic should this comparison assume? Guessing raw numbers "
-        "cold is hard, so pick a preset scenario below, compare all of them at "
-        "once, or enter your own numbers if none fit.\n"
-    )
-    for i, preset in enumerate(WORKLOAD_PRESETS, start=1):
-        print(f"  {i}. {preset.label} — {preset.description}")
-    all_option = len(WORKLOAD_PRESETS) + 1
-    custom_option = len(WORKLOAD_PRESETS) + 2
-    print(f"  {all_option}. Compare all of the above scenarios")
-    print(f"  {custom_option}. Enter my own numbers")
-
-    choices = [str(i) for i in range(1, custom_option + 1)]
-    choice = int(prompt_choice("Choice", choices, default=str(all_option)))
-
-    if choice <= len(WORKLOAD_PRESETS):
-        preset = WORKLOAD_PRESETS[choice - 1]
-        return [(preset.key, preset.label, preset.to_workload())]
-    if choice == all_option:
-        return [(p.key, p.label, p.to_workload()) for p in WORKLOAD_PRESETS]
-    return [("custom", "Custom", _prompt_custom_workload())]
-
-
 def interactive_local_setup() -> tuple:
     """Returns ``(row_builder, display_currency, usd_per_gbp, tokens_per_sec)``.
 
@@ -1409,32 +1390,40 @@ def interactive_local_setup() -> tuple:
             minimum=0,
         )
 
+        # Octopus Agile is a UK-only tariff, so choosing to look it up already
+        # answers "do you pay in GBP?" — asking that separately first was a
+        # redundant question for anyone who was about to say yes to Agile.
         electricity_rate = None
         display_currency = "USD"
         usd_per_gbp = None
-        if prompt_yes_no("Do you pay for electricity in GBP (e.g. UK)?", default=True):
+        gbp_rate = None
+        if prompt_yes_no(
+            "Look up your current unit rate live from Octopus Agile? "
+            "(UK-only — implies you pay in GBP)",
+            default=True,
+        ):
             display_currency = "GBP"
-            gbp_rate = None
-            if prompt_yes_no(
-                "Look up your current unit rate live from Octopus Agile?", default=True
-            ):
-                region = (
-                    input("Octopus Energy region letter (A-P; C = London) [C]: ")
-                    .strip()
-                    .upper()
-                    or "C"
-                )
-                gbp_rate = fetch_octopus_agile_rate(region)
-                if gbp_rate is not None:
-                    print(f"  Current Octopus Agile unit rate: £{gbp_rate:.4f}/kWh")
-                else:
-                    print(
-                        "  Could not fetch a live Octopus Agile rate — enter manually."
-                    )
-            if gbp_rate is None:
+            region = (
+                input("Octopus Energy region letter (A-P; C = London) [C]: ")
+                .strip()
+                .upper()
+                or "C"
+            )
+            gbp_rate = fetch_octopus_agile_rate(region)
+            if gbp_rate is not None:
+                print(f"  Current Octopus Agile unit rate: £{gbp_rate:.4f}/kWh")
+            else:
+                print("  Could not fetch a live Octopus Agile rate — enter manually.")
                 gbp_rate = prompt_float(
                     "Electricity rate (GBP/kWh)", default=0.2483, minimum=0
                 )
+        elif prompt_yes_no("Do you pay for electricity in GBP (e.g. UK)?", default=True):
+            display_currency = "GBP"
+            gbp_rate = prompt_float(
+                "Electricity rate (GBP/kWh)", default=0.2483, minimum=0
+            )
+
+        if display_currency == "GBP":
             live_usd_per_gbp = fetch_fx_rate("GBP", "USD")
             if live_usd_per_gbp is not None:
                 print(f"  Current GBP→USD exchange rate: {live_usd_per_gbp:.4f}")
@@ -1505,6 +1494,15 @@ def interactive_provider_selection(pricing: dict) -> Optional[set]:
 
 
 def run_interactive() -> int:
+    """Compare local hardware running flat-out, 24/7, against hosted providers.
+
+    There's no workload-size question here — traffic-level presets mostly
+    converged to the same answer anyway once a slower local setup couldn't
+    keep up (every infeasible preset scaled to the same capacity ceiling),
+    so the comparison is sized directly from what the local hardware can
+    actually produce in a real month instead (see
+    ``local_max_capacity_workload``).
+    """
     print("LLM Cost Comparison — local vs hosted APIs")
     print("=" * 60)
     pricing = load_pricing()
@@ -1512,81 +1510,39 @@ def run_interactive() -> int:
     note = pricing.get("note", "")
     print(f"Hosted pricing as of {as_of}. {note}\n")
 
-    scenarios = interactive_workload()
     local_row_builder, display_currency, usd_per_gbp, tokens_per_sec = (
         interactive_local_setup()
     )
     selected = interactive_provider_selection(pricing)
 
-    scenario_rows = {}
-    scaled_scenarios = []
-    for key, label, workload in scenarios:
-        effective_workload, feasible, coverage_pct = scale_workload_to_local_capacity(
-            workload, tokens_per_sec
-        )
-        if not feasible:
-            scaled_scenarios.append((label, coverage_pct))
-        rows = list(local_row_builder(effective_workload))
-        rows.extend(build_hosted_rows(effective_workload, pricing, selected))
-        if display_currency == "GBP":
-            rows = convert_rows_currency(rows, usd_per_gbp)
-        scenario_rows[key] = (label, effective_workload, rows)
+    workload = local_max_capacity_workload(tokens_per_sec)
+    rows = list(local_row_builder(workload))
+    rows.extend(build_hosted_rows(workload, pricing, selected))
+    if display_currency == "GBP":
+        rows = convert_rows_currency(rows, usd_per_gbp)
 
-    if scaled_scenarios:
-        print(
-            "\nNote: this local setup can't produce the full requested traffic "
-            "running 24/7 for every scenario below — figures for these are "
-            "scaled to what it can actually generate in a real month, so local "
-            "and hosted costs stay directly comparable:"
-        )
-        for label, coverage_pct in scaled_scenarios:
-            print(f"  - {label}: scaled to {coverage_pct:.0f}% of its original traffic")
-
-    if len(scenario_rows) == 1:
-        ((label, workload, rows),) = scenario_rows.values()
-        print(f"\n== Results: {label} ==")
-        print(
-            f"Workload: {workload.requests_per_day:.0f} requests/day, "
-            f"{workload.monthly_total_tokens:,.0f} total tokens/month"
-        )
-        print()
-        print(render_table(rows, currency=display_currency))
-    else:
-        print("\n== Results (all scenarios) ==")
-        print(
-            render_combined_table(
-                [(label, rows) for label, _workload, rows in scenario_rows.values()],
-                currency=display_currency,
-            )
-        )
+    print("\n== Results: Local at maximum capacity ==")
+    print(
+        f"Local hardware can produce {workload.monthly_total_tokens:,.0f} "
+        f"tokens/month running 24/7 at {tokens_per_sec:.1f} tok/s (assuming a "
+        f"{DEFAULT_AVG_INPUT_TOKENS:.0f}:{DEFAULT_AVG_OUTPUT_TOKENS:.0f} "
+        "input:output token ratio per request, since hosted providers price "
+        "those differently)."
+    )
+    print()
+    print(render_table(rows, currency=display_currency))
 
     if prompt_yes_no("\nExport results to a file?", default=False):
         fmt = prompt_choice("Format", ["csv", "json"], default="csv")
-        if len(scenario_rows) > 1:
-            default_name = f"cost_comparison.{fmt}"
-            out_path = Path(
-                input(f"Output path [{default_name}]: ").strip() or default_name
-            )
-            combined = [
-                (label, rows) for label, _workload, rows in scenario_rows.values()
-            ]
-            if fmt == "csv":
-                export_combined_csv(combined, out_path, currency=display_currency)
-            else:
-                export_combined_json(combined, out_path, currency=display_currency)
-            print(f"Wrote {out_path}")
+        default_name = f"cost_comparison.{fmt}"
+        out_path = Path(
+            input(f"Output path [{default_name}]: ").strip() or default_name
+        )
+        if fmt == "csv":
+            export_csv(rows, out_path, currency=display_currency)
         else:
-            ((label, _workload, rows),) = scenario_rows.values()
-            default_name = f"cost_comparison.{fmt}"
-            out_path = Path(
-                input(f"Output path for '{label}' [{default_name}]: ").strip()
-                or default_name
-            )
-            if fmt == "csv":
-                export_csv(rows, out_path, currency=display_currency)
-            else:
-                export_json(rows, out_path, currency=display_currency)
-            print(f"Wrote {out_path}")
+            export_json(rows, out_path, currency=display_currency)
+        print(f"Wrote {out_path}")
 
     return 0
 
