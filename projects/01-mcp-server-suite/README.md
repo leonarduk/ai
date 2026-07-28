@@ -4,7 +4,7 @@
 
 ## Overview
 
-This project implements 7 specialized MCP servers that provide LLMs with structured access to external systems and data sources. Each server handles a specific domain, maintaining clear separation of concerns and independent deployment.
+This project implements 8 specialized MCP servers that provide LLMs with structured access to external systems and data sources. Each server handles a specific domain, maintaining clear separation of concerns and independent deployment.
 
 ## Architecture
 
@@ -85,6 +85,17 @@ See [ADR-001](./docs/adr-001-multi-server-architecture.md) for detailed decision
 - Cross-platform support
 
 [Documentation](./servers/os-info-mcp-server/README.md)
+
+### 8. Prize Draw MCP Server
+**Purpose:** Prize draw discovery and entry mechanics (search, parse, submit, log)
+**Tools:** `search_draws`, `parse_entry_page`, `submit_entry`, `check_log`
+**Key Features:**
+- Pluggable source config (static/mock and RSS)
+- Dry-run mode and safety refusals for personal data / purchase-required draws
+- JSONL entry log for duplicate avoidance
+- No LLM/provider logic - reasoning is left to the orchestrating client
+
+[Documentation](./servers/prize-draw-mcp-server/README.md)
 
 ## Quick Start
 
@@ -202,7 +213,8 @@ bandit -r servers/
 │   ├── email-mcp-server/
 │   ├── web-mcp-server/
 │   ├── data-format-mcp-server/
-│   └── os-info-mcp-server/
+│   ├── os-info-mcp-server/
+│   └── prize-draw-mcp-server/
 └── shared/                      # Common utilities (future)
     ├── auth.py
     ├── logging.py
