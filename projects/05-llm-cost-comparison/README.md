@@ -152,7 +152,11 @@ requests/day and token counts behind each one.
 
 ## Updating pricing
 
-Hosted pricing changes over time. Edit `pricing.json` directly. Its shape is:
+Hosted pricing changes over time. Edit `pricing.json` directly, or run
+`python llm_cost_comparison.py --update-pricing` when you explicitly want the
+script to refresh the shipped cache from best-effort live sources. Normal
+interactive and non-interactive comparisons only read the file; they do not
+overwrite manual edits. Its shape is:
 
 ```json
 {

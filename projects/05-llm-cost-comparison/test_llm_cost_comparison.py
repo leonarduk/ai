@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import json
 import subprocess
+import threading
 from pathlib import Path
 
 import pytest
@@ -208,6 +209,14 @@ def test_build_local_row_rented():
     assert row.monthly_cost > 0
 
 
+def test_build_local_row_rented_preserves_custom_name():
+    w = m.Workload(requests_per_day=100, avg_input_tokens=500, avg_output_tokens=500)
+    row = m.build_local_row(
+        w, tokens_per_sec=100, mode="rent", hourly_rate=2.0, name="Local H100 rental"
+    )
+    assert row.name == "Local H100 rental"
+
+
 def test_build_local_row_rejects_unknown_mode():
     w = m.Workload(100, 500, 500)
     with pytest.raises(ValueError):
@@ -300,6 +309,11 @@ def test_load_pricing_raises_config_error_on_invalid_json(tmp_path: Path):
     bad_path.write_text("{not valid json", encoding="utf-8")
     with pytest.raises(m.ConfigError, match="not valid JSON"):
         m.load_pricing(bad_path)
+
+
+def test_load_pricing_raises_config_error_on_missing_file(tmp_path: Path):
+    with pytest.raises(m.ConfigError, match="pricing file not found"):
+        m.load_pricing(tmp_path / "missing-pricing.json")
 
 
 # --------------------------------------------------------------------------
@@ -447,6 +461,12 @@ def test_convert_rows_currency_divides_by_rate():
     assert converted[0].monthly_cost == pytest.approx(100.0)
     assert converted[0].cost_per_million_tokens == pytest.approx(10.0)
     assert converted[0].name == "A"
+
+
+def test_convert_rows_currency_rejects_zero_rate():
+    rows = [m.ComparisonRow("A", monthly_cost=127.0, cost_per_million_tokens=12.7)]
+    with pytest.raises(ValueError, match="usd_per_gbp must be > 0"):
+        m.convert_rows_currency(rows, usd_per_gbp=0)
 
 
 def test_export_csv_and_json(tmp_path: Path):
@@ -788,13 +808,17 @@ def test_measure_gpu_power_during_returns_average_reading(monkeypatch):
             {"name": "RTX 4090", "power_draw_w": 380.0},
         ]
     )
-    monkeypatch.setattr(
-        m,
-        "detect_nvidia_gpu",
-        lambda runner=None: next(readings, None),
-    )
+    polled = threading.Event()
+
+    def next_reading(runner=None):
+        polled.set()
+        return next(readings, {"name": "RTX 4090", "power_draw_w": 380.0})
+
+    monkeypatch.setattr(m, "detect_nvidia_gpu", next_reading)
     result, avg = m.measure_gpu_power_during(
-        lambda: "done", runner=lambda *a, **k: None, poll_interval=0.01
+        lambda: (polled.wait(5), "done")[1],
+        runner=lambda *a, **k: None,
+        poll_interval=0.01,
     )
     assert result == "done"
     # Only two readings are queued, so the average must be strictly between
