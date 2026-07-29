@@ -1,0 +1,27 @@
+name: Octopus Agile price alert
+
+on:
+  schedule:
+    - cron: "30 16 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  check-rates:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Check tomorrow's Agile rates
+        env:
+          ALERT_WEBHOOK_URL: ${{ secrets.ALERT_WEBHOOK_URL }}
+          OCTOPUS_PRODUCT_CODE: ${{ vars.OCTOPUS_PRODUCT_CODE }}
+          OCTOPUS_REGION: ${{ vars.OCTOPUS_REGION }}
+          OCTOPUS_TARIFF_CODE: ${{ vars.OCTOPUS_TARIFF_CODE }}
+          ALERT_THRESHOLD_PENCE: ${{ vars.ALERT_THRESHOLD_PENCE }}
+          ALERT_TIMEZONE: ${{ vars.ALERT_TIMEZONE }}
+        run: python projects/06-octopus-agile-alert/agile_alert.py
