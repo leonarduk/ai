@@ -1,0 +1,7 @@
+{
+  "prize_types": ["cash", "electronics", "holiday"],
+  "min_prize_value": 50,
+  "entry_methods": ["web_form", "email"],
+  "regions": ["UK"],
+  "max_days_to_closing": 30
+}

@@ -1,0 +1,251 @@
+"""Configurable LLM-provider abstraction: local Ollama (default), DeepSeek, or
+Claude, selected via `LLM_PROVIDER` (see `config.py` / README).
+
+Every provider exposes the same `generate_json(prompt, schema)` method so the
+orchestrator's reasoning code (parsing, filtering, eligibility, tie-breakers)
+never needs to know which backend answered it.
+
+Privacy note: `OllamaProvider` never sends prompt content outside the local
+machine. `DeepSeekProvider` and `ClaudeProvider` send the full prompt —
+including any competition content and any personal data embedded in it — to
+that provider's hosted API. Both must be explicitly configured (see
+`config.py`); neither is ever selected by default.
+"""
+
+from __future__ import annotations
+
+import json
+from typing import Any, Protocol
+
+import requests
+
+DEFAULT_OLLAMA_HOST = "http://localhost:11434"
+DEFAULT_OLLAMA_MODEL = "llama3"
+DEFAULT_DEEPSEEK_MODEL = "deepseek-v4-flash"
+DEFAULT_DEEPSEEK_BASE_URL = "https://api.deepseek.com/v1"
+DEFAULT_CLAUDE_MODEL = "claude-sonnet-4-6"
+DEFAULT_TIMEOUT = 60
+
+
+class LLMProviderError(RuntimeError):
+    """Raised when an LLM backend can't be reached or returns unusable output."""
+
+
+class LLMProvider(Protocol):
+    """Common interface every LLM backend implements."""
+
+    def generate_json(
+        self, prompt: str, schema: dict[str, Any] | None = None
+    ) -> dict[str, Any]:
+        """Send `prompt` to the backend and return its response parsed as a JSON object.
+
+        `schema` is a best-effort hint: providers that support constrained/
+        structured output (currently Ollama) use it to guarantee the shape;
+        providers that don't (DeepSeek, Claude) rely on prompt instructions
+        and best-effort JSON parsing instead. Raises `LLMProviderError` if
+        the backend can't be reached or the response can't be parsed as a
+        JSON object.
+        """
+        ...
+
+
+def _parse_json_object(raw_text: str, provider_name: str) -> dict[str, Any]:
+    """Parse `raw_text` as a JSON object, raising `LLMProviderError` if it isn't one."""
+    try:
+        parsed = json.loads(raw_text.strip())
+    except json.JSONDecodeError as exc:
+        raise LLMProviderError(
+            f"{provider_name} did not return valid JSON: {raw_text[:200]!r}"
+        ) from exc
+    if not isinstance(parsed, dict):
+        raise LLMProviderError(
+            f"{provider_name} returned JSON that isn't an object: {raw_text[:200]!r}"
+        )
+    return parsed
+
+
+class OllamaProvider:
+    """Local Ollama backend. Default provider; no data leaves the machine."""
+
+    name = "ollama"
+
+    def __init__(
+        self,
+        host: str = DEFAULT_OLLAMA_HOST,
+        model: str = DEFAULT_OLLAMA_MODEL,
+        timeout: int = DEFAULT_TIMEOUT,
+    ):
+        """Configure the Ollama endpoint, model, and per-request timeout."""
+        self.host = host
+        self.model = model
+        self.timeout = timeout
+
+    def generate_json(
+        self, prompt: str, schema: dict[str, Any] | None = None
+    ) -> dict[str, Any]:
+        """Call Ollama's `/api/generate` with structured-output `format`, parse the JSON reply."""
+        payload: dict[str, Any] = {
+            "model": self.model,
+            "prompt": prompt,
+            "stream": False,
+            "format": schema if schema is not None else "json",
+        }
+        try:
+            response = requests.post(
+                f"{self.host.rstrip('/')}/api/generate",
+                json=payload,
+                timeout=self.timeout,
+            )
+            response.raise_for_status()
+            raw_text = response.json().get("response", "")
+        except requests.exceptions.ConnectionError as exc:
+            raise LLMProviderError(
+                f"Could not reach local Ollama server at {self.host}. Is `ollama serve` running?"
+            ) from exc
+        except requests.exceptions.RequestException as exc:
+            raise LLMProviderError(f"Ollama request failed: {exc}") from exc
+
+        return _parse_json_object(raw_text, "Ollama")
+
+
+class DeepSeekProvider:
+    """DeepSeek backend (OpenAI-compatible chat completions API).
+
+    Opt-in: configuring this provider sends prompt content — including
+    competition text and any personal data embedded in it — to DeepSeek's
+    hosted API. See README for the required informed-consent configuration.
+    """
+
+    name = "deepseek"
+
+    def __init__(
+        self,
+        api_key: str,
+        model: str = DEFAULT_DEEPSEEK_MODEL,
+        base_url: str = DEFAULT_DEEPSEEK_BASE_URL,
+        timeout: int = DEFAULT_TIMEOUT,
+    ):
+        """Configure the DeepSeek API key, model, base URL, and timeout."""
+        if not api_key:
+            raise LLMProviderError(
+                "DeepSeek provider requires DEEPSEEK_API_KEY to be set."
+            )
+        self.api_key = api_key
+        self.model = model
+        self.base_url = base_url
+        self.timeout = timeout
+
+    def generate_json(
+        self, prompt: str, schema: dict[str, Any] | None = None
+    ) -> dict[str, Any]:
+        """Call DeepSeek's chat completions API and parse the reply as a JSON object."""
+        payload = {
+            "model": self.model,
+            "messages": [{"role": "user", "content": prompt}],
+            "temperature": 0.0,
+            "response_format": {"type": "json_object"},
+        }
+        headers = {
+            "Authorization": f"Bearer {self.api_key}",
+            "Content-Type": "application/json",
+        }
+        try:
+            response = requests.post(
+                f"{self.base_url.rstrip('/')}/chat/completions",
+                json=payload,
+                headers=headers,
+                timeout=self.timeout,
+            )
+            response.raise_for_status()
+            data = response.json()
+        except requests.exceptions.RequestException as exc:
+            raise LLMProviderError(f"DeepSeek request failed: {exc}") from exc
+
+        choices = data.get("choices", [])
+        if not choices:
+            raise LLMProviderError(f"DeepSeek returned no choices: {data!r}")
+        content = choices[0].get("message", {}).get("content", "")
+        return _parse_json_object(content, "DeepSeek")
+
+
+class ClaudeProvider:
+    """Anthropic Claude backend (Messages API).
+
+    Opt-in: configuring this provider sends prompt content — including
+    competition text and any personal data embedded in it — to Anthropic's
+    hosted API. See README for the required informed-consent configuration.
+    """
+
+    name = "claude"
+
+    def __init__(
+        self,
+        api_key: str,
+        model: str = DEFAULT_CLAUDE_MODEL,
+        max_tokens: int = 2000,
+        timeout: int = DEFAULT_TIMEOUT,
+    ):
+        """Configure the Anthropic API key, model, max tokens, and timeout."""
+        if not api_key:
+            raise LLMProviderError(
+                "Claude provider requires ANTHROPIC_API_KEY to be set."
+            )
+        self.api_key = api_key
+        self.model = model
+        self.max_tokens = max_tokens
+        self.timeout = timeout
+
+    def generate_json(
+        self, prompt: str, schema: dict[str, Any] | None = None
+    ) -> dict[str, Any]:
+        """Call Anthropic's Messages API and parse the reply's text content as JSON."""
+        payload = {
+            "model": self.model,
+            "max_tokens": self.max_tokens,
+            "messages": [{"role": "user", "content": prompt}],
+        }
+        headers = {
+            "x-api-key": self.api_key,
+            "anthropic-version": "2023-06-01",
+            "content-type": "application/json",
+        }
+        try:
+            response = requests.post(
+                "https://api.anthropic.com/v1/messages",
+                json=payload,
+                headers=headers,
+                timeout=self.timeout,
+            )
+            response.raise_for_status()
+            data = response.json()
+        except requests.exceptions.RequestException as exc:
+            raise LLMProviderError(f"Claude request failed: {exc}") from exc
+
+        content = data.get("content", [])
+        text = "\n".join(
+            block.get("text", "") for block in content if block.get("type") == "text"
+        ).strip()
+        return _parse_json_object(text, "Claude")
+
+
+def build_llm_provider(config: Any) -> LLMProvider:
+    """Construct the configured `LLMProvider` from a `Config` object.
+
+    `config.llm_provider` selects the backend: 'ollama' (default), 'deepseek',
+    or 'claude'. Raises `LLMProviderError` for an unknown provider name or
+    missing required credentials.
+    """
+    provider = (config.llm_provider or "ollama").strip().lower()
+    if provider == "ollama":
+        return OllamaProvider(host=config.ollama_host, model=config.ollama_model)
+    if provider == "deepseek":
+        return DeepSeekProvider(
+            api_key=config.deepseek_api_key, model=config.deepseek_model
+        )
+    if provider == "claude":
+        return ClaudeProvider(
+            api_key=config.anthropic_api_key, model=config.claude_model
+        )
+    raise LLMProviderError(
+        f"Unknown LLM_PROVIDER '{provider}'. Expected 'ollama', 'deepseek', or 'claude'."
+    )
