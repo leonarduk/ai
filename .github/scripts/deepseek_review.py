@@ -14,7 +14,13 @@ from typing import Any
 from review_common import build_prompt, emit_empty_diff_notice, fetch_review, finalize_review, load_review_context
 
 DEFAULT_DEEPSEEK_MODEL = "deepseek-v4-flash"
-DEFAULT_MAX_TOKENS = 4096
+# 4096 was observed truncating structured reviews on larger diffs before the
+# model reached the required verdict line, which extract_verdict.py then
+# reports as a missing verdict (a false "changes requested" outcome, not a
+# real review finding). 8192 gives deepseek-v4-flash enough headroom to
+# finish the full five-section review plus verdict on this repo's typical
+# diff sizes.
+DEFAULT_MAX_TOKENS = 8192
 
 
 def get_deepseek_model() -> str:
@@ -38,12 +44,12 @@ def get_max_tokens() -> int:
 
 
 def extract_deepseek_review(data: dict[str, Any]) -> tuple[str, dict[str, Any]]:
-    """Extract review text from DeepSeek chat-completions responses.
+    """Extract review text and finish reason from DeepSeek chat-completions responses.
 
     DeepSeek's API is OpenAI-compatible: the response shape is always
-    `{"choices": [{"message": {"content": "<string>"}}]}` — unlike Anthropic's
-    content-block format, DeepSeek never returns `content` as a list, so no
-    list-handling branch is needed here.
+    `{"choices": [{"message": {"content": "<string>"}, "finish_reason": "<string>"}]}`
+    — unlike Anthropic's content-block format, DeepSeek never returns `content`
+    as a list, so no list-handling branch is needed here.
     """
     choices = data.get("choices", [])
     if not choices:
@@ -52,7 +58,7 @@ def extract_deepseek_review(data: dict[str, Any]) -> tuple[str, dict[str, Any]]:
     message = choices[0].get("message", {})
     content = message.get("content", "")
     review = content.strip() if isinstance(content, str) else ""
-    return review, {}
+    return review, {"finish_reason": choices[0].get("finish_reason")}
 
 
 def fetch_deepseek_review(api_key: str, prompt: str) -> str:
@@ -73,13 +79,20 @@ def fetch_deepseek_review(api_key: str, prompt: str) -> str:
         "Content-Type": "application/json",
     }
 
-    review, _extra = fetch_review(
+    review, extra = fetch_review(
         "https://api.deepseek.com/v1/chat/completions",
         headers,
         payload,
         extract_deepseek_review,
         "DeepSeek",
     )
+    if extra.get("finish_reason") == "length":
+        review = (
+            f"{review}\n\n"
+            "_Note: DeepSeek hit the review token budget before finishing (and may be missing "
+            "a verdict line as a result). Consider increasing `DEEPSEEK_MAX_TOKENS` or applying "
+            "the `Deep Review Required` label if this keeps happening._"
+        ).strip()
     return review
 
 
