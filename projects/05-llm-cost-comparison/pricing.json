@@ -1,0 +1,428 @@
+{
+  "as_of": "2026-07-28",
+  "source_deepseek": "https://api-docs.deepseek.com/quick_start/pricing/",
+  "source_bedrock": "https://pricing.us-east-1.amazonaws.com/offers/v1.0/aws/AmazonBedrock/current/region_index.json",
+  "note": "DeepSeek direct and Bedrock-hosted pricing both verified against live sources. Bedrock adds a ~4x platform markup on DeepSeek vs direct API. Claude pricing is identical direct vs Bedrock (zero markup).",
+  "providers": {
+    "aws": {
+      "display_name": "AWS Bedrock",
+      "models": {
+        "bedrock-sonnet-5": {
+          "display_name": "Bedrock Sonnet 5",
+          "input_per_million": 2.0,
+          "output_per_million": 10.0
+        },
+        "bedrock-haiku-4.5": {
+          "display_name": "Bedrock Haiku 4.5",
+          "input_per_million": 1.0,
+          "output_per_million": 5.0
+        },
+        "bedrock-deepseek-v3.2": {
+          "display_name": "Bedrock DeepSeek V3.2",
+          "input_per_million": 0.62,
+          "output_per_million": 1.85
+        },
+        "bedrock-deepseek-v3.1": {
+          "display_name": "Bedrock DeepSeek V3.1",
+          "input_per_million": 0.58,
+          "output_per_million": 1.68
+        },
+        "nova-20-pro": {
+          "display_name": "Bedrock Nova 2.0 Pro",
+          "input_per_million": 0.625,
+          "output_per_million": 19.25
+        },
+        "glm-47": {
+          "display_name": "Bedrock GLM 4.7",
+          "input_per_million": 1.05,
+          "output_per_million": 1.1
+        },
+        "nova-20-omni": {
+          "display_name": "Bedrock Nova 2.0 Omni",
+          "input_per_million": 0.2,
+          "output_per_million": 22.0
+        },
+        "gpt-oss-safeguard-120b": {
+          "display_name": "Bedrock GPT OSS Safeguard 120B",
+          "input_per_million": 0.15,
+          "output_per_million": 0.3
+        },
+        "writer-palmyra-vision-7b": {
+          "display_name": "Bedrock Writer Palmyra Vision 7B",
+          "input_per_million": 0.075,
+          "output_per_million": 0.3
+        },
+        "ministral-8b-30": {
+          "display_name": "Bedrock Ministral 8B 3.0",
+          "input_per_million": 0.07,
+          "output_per_million": 0.26
+        },
+        "glm-5": {
+          "display_name": "Bedrock GLM 5",
+          "input_per_million": 0.5,
+          "output_per_million": 3.2
+        },
+        "glm-47-flash": {
+          "display_name": "Bedrock GLM 4.7 Flash",
+          "input_per_million": 0.1225,
+          "output_per_million": 0.4
+        },
+        "nemotron-nano-3-30b": {
+          "display_name": "Bedrock Nemotron Nano 3 30B",
+          "input_per_million": 0.03,
+          "output_per_million": 0.24
+        },
+        "googlegemma-4-31b": {
+          "display_name": "Bedrock google.gemma-4-31b",
+          "input_per_million": 0.14,
+          "output_per_million": 0.4
+        },
+        "gpt-oss-120b": {
+          "display_name": "Bedrock gpt-oss-120b",
+          "input_per_million": 0.15,
+          "output_per_million": 0.3
+        },
+        "llama-32-1b": {
+          "display_name": "Bedrock Llama 3.2 1B",
+          "input_per_million": 0.1,
+          "output_per_million": 0.1
+        },
+        "qwen3-32b": {
+          "display_name": "Bedrock Qwen3 32B",
+          "input_per_million": 0.075,
+          "output_per_million": 0.6
+        },
+        "nova-20-lite": {
+          "display_name": "Bedrock Nova 2.0 Lite",
+          "input_per_million": 0.525,
+          "output_per_million": 1.25
+        },
+        "ministral-3b-30": {
+          "display_name": "Bedrock Ministral 3B 3.0",
+          "input_per_million": 0.1,
+          "output_per_million": 0.1
+        },
+        "gpt-oss-safeguard-20b": {
+          "display_name": "Bedrock GPT OSS Safeguard 20B",
+          "input_per_million": 0.07,
+          "output_per_million": 0.35
+        },
+        "llama-4-scout-17b": {
+          "display_name": "Bedrock Llama 4 Scout 17B",
+          "input_per_million": 0.17,
+          "output_per_million": 0.33
+        },
+        "llama-32-3b": {
+          "display_name": "Bedrock Llama 3.2 3B",
+          "input_per_million": 0.15,
+          "output_per_million": 0.15
+        },
+        "minimax-m2": {
+          "display_name": "Bedrock Minimax M2",
+          "input_per_million": 0.3,
+          "output_per_million": 0.6
+        },
+        "mistral-small": {
+          "display_name": "Bedrock Mistral Small",
+          "input_per_million": 1.0,
+          "output_per_million": 3.0
+        },
+        "nvidia-nemotron-nano-2-vl": {
+          "display_name": "Bedrock NVIDIA Nemotron Nano 2 VL",
+          "input_per_million": 0.2,
+          "output_per_million": 1.05
+        },
+        "voxtral-small-10": {
+          "display_name": "Bedrock Voxtral Small 1.0",
+          "input_per_million": 0.05,
+          "output_per_million": 0.3
+        },
+        "llama-31-405b": {
+          "display_name": "Bedrock Llama 3.1 405B",
+          "input_per_million": 1.2,
+          "output_per_million": 1.2
+        },
+        "gemma-3-12b": {
+          "display_name": "Bedrock Gemma 3 12B",
+          "input_per_million": 0.09,
+          "output_per_million": 0.15
+        },
+        "gpt-oss-20b": {
+          "display_name": "Bedrock gpt-oss-20b",
+          "input_per_million": 0.035,
+          "output_per_million": 0.3
+        },
+        "llama-4-maverick-17b": {
+          "display_name": "Bedrock Llama 4 Maverick 17B",
+          "input_per_million": 0.12,
+          "output_per_million": 0.97
+        },
+        "r1": {
+          "display_name": "Bedrock R1",
+          "input_per_million": 1.35,
+          "output_per_million": 5.4
+        },
+        "llama-31-70b": {
+          "display_name": "Bedrock Llama 3.1 70B",
+          "input_per_million": 0.72,
+          "output_per_million": 0.72
+        },
+        "nova-premier": {
+          "display_name": "Bedrock Nova Premier",
+          "input_per_million": 1.25,
+          "output_per_million": 12.5
+        },
+        "qwen3-coder-next": {
+          "display_name": "Bedrock Qwen3 Coder Next",
+          "input_per_million": 0.875,
+          "output_per_million": 1.2
+        },
+        "ministral-14b-30": {
+          "display_name": "Bedrock Ministral 14B 3.0",
+          "input_per_million": 0.2,
+          "output_per_million": 0.2
+        },
+        "llama-32-11b": {
+          "display_name": "Bedrock Llama 3.2 11B",
+          "input_per_million": 0.16,
+          "output_per_million": 0.16
+        },
+        "nova-pro": {
+          "display_name": "Bedrock Nova Pro",
+          "input_per_million": 0.35,
+          "output_per_million": 3.2
+        },
+        "qwen3-vl-235b-a22b": {
+          "display_name": "Bedrock Qwen3 VL 235B A22B",
+          "input_per_million": 0.26,
+          "output_per_million": 1.33
+        },
+        "kimi-k25": {
+          "display_name": "Bedrock Kimi K2.5",
+          "input_per_million": 0.3,
+          "output_per_million": 5.25
+        },
+        "minimax-m21": {
+          "display_name": "Bedrock Minimax M2.1",
+          "input_per_million": 0.15,
+          "output_per_million": 0.6
+        },
+        "mistral-large": {
+          "display_name": "Bedrock Mistral Large",
+          "input_per_million": 4.0,
+          "output_per_million": 12.0
+        },
+        "voxtral-mini-10": {
+          "display_name": "Bedrock Voxtral Mini 1.0",
+          "input_per_million": 0.04,
+          "output_per_million": 0.07
+        },
+        "gemma-3-4b": {
+          "display_name": "Bedrock Gemma 3 4B",
+          "input_per_million": 0.02,
+          "output_per_million": 0.04
+        },
+        "nvidia-nemotron-3-super-120b-a12b": {
+          "display_name": "Bedrock NVIDIA Nemotron 3 Super 120B A12B",
+          "input_per_million": 0.075,
+          "output_per_million": 0.325
+        },
+        "gemma-3-27b": {
+          "display_name": "Bedrock Gemma 3 27B",
+          "input_per_million": 0.23,
+          "output_per_million": 0.38
+        },
+        "nova-micro": {
+          "display_name": "Bedrock Nova Micro",
+          "input_per_million": 0.0175,
+          "output_per_million": 0.14
+        },
+        "mistral-large-3": {
+          "display_name": "Bedrock Mistral Large 3",
+          "input_per_million": 0.5,
+          "output_per_million": 1.5
+        },
+        "llama-31-70b-latency-optimized": {
+          "display_name": "Bedrock Llama 3.1 70B Latency Optimized",
+          "input_per_million": 0.9,
+          "output_per_million": 0.9
+        },
+        "nova-lite": {
+          "display_name": "Bedrock Nova Lite",
+          "input_per_million": 0.06,
+          "output_per_million": 0.24
+        },
+        "nova-sonic-20": {
+          "display_name": "Bedrock Nova Sonic 2.0",
+          "input_per_million": 3.0,
+          "output_per_million": 2.75
+        },
+        "llama-32-90b": {
+          "display_name": "Bedrock Llama 3.2 90B",
+          "input_per_million": 0.72,
+          "output_per_million": 0.72
+        },
+        "minimax-m25": {
+          "display_name": "Bedrock MiniMax M2.5",
+          "input_per_million": 0.3,
+          "output_per_million": 0.6
+        },
+        "qwen3-coder-480b-a35b": {
+          "display_name": "Bedrock Qwen3 Coder 480B A35B",
+          "input_per_million": 0.45,
+          "output_per_million": 1.8
+        },
+        "qwen3-next-80b-a3b": {
+          "display_name": "Bedrock Qwen3 Next 80B A3B",
+          "input_per_million": 0.14,
+          "output_per_million": 2.1
+        },
+        "qwen3-coder-30b-a3b": {
+          "display_name": "Bedrock Qwen3 Coder 30B A3B",
+          "input_per_million": 0.075,
+          "output_per_million": 0.6
+        },
+        "nova-sonic": {
+          "display_name": "Bedrock Nova Sonic",
+          "input_per_million": 3.4,
+          "output_per_million": 0.24
+        },
+        "devstral": {
+          "display_name": "Bedrock Devstral",
+          "input_per_million": 0.2,
+          "output_per_million": 1.0
+        },
+        "nvidia-nemotron-nano-2": {
+          "display_name": "Bedrock NVIDIA Nemotron Nano 2",
+          "input_per_million": 0.11,
+          "output_per_million": 0.23
+        },
+        "mixtral-8x7b": {
+          "display_name": "Bedrock Mixtral 8x7B",
+          "input_per_million": 0.45,
+          "output_per_million": 0.7
+        },
+        "llama-33-70b": {
+          "display_name": "Bedrock Llama 3.3 70B",
+          "input_per_million": 0.36,
+          "output_per_million": 0.36
+        },
+        "deepseek-v32": {
+          "display_name": "Bedrock DeepSeek v3.2",
+          "input_per_million": 0.62,
+          "output_per_million": 3.2375
+        },
+        "googlegemma-4-e2b": {
+          "display_name": "Bedrock google.gemma-4-e2b",
+          "input_per_million": 0.04,
+          "output_per_million": 0.08
+        },
+        "kimi-k2-thinking": {
+          "display_name": "Bedrock Kimi K2 Thinking",
+          "input_per_million": 0.3,
+          "output_per_million": 4.38
+        },
+        "magistral-small-12": {
+          "display_name": "Bedrock Magistral Small 1.2",
+          "input_per_million": 0.88,
+          "output_per_million": 0.75
+        },
+        "llama-31-8b": {
+          "display_name": "Bedrock Llama 3.1 8B",
+          "input_per_million": 0.22,
+          "output_per_million": 0.22
+        },
+        "deepseek-v31": {
+          "display_name": "Bedrock DeepSeek V3.1",
+          "input_per_million": 0.58,
+          "output_per_million": 1.68
+        },
+        "mistral-7b": {
+          "display_name": "Bedrock Mistral 7B",
+          "input_per_million": 0.15,
+          "output_per_million": 0.2
+        },
+        "llama-3-8b": {
+          "display_name": "Bedrock Llama 3 8B",
+          "input_per_million": 0.3,
+          "output_per_million": 0.6
+        },
+        "pixtral-large-2502": {
+          "display_name": "Bedrock Pixtral Large 25.02",
+          "input_per_million": 2.0,
+          "output_per_million": 6.0
+        },
+        "googlegemma-4-26b-a4b": {
+          "display_name": "Bedrock google.gemma-4-26b-a4b",
+          "input_per_million": 0.13,
+          "output_per_million": 0.4
+        },
+        "qwen3-235b-a22b-2507": {
+          "display_name": "Bedrock Qwen3 235B A22B 2507",
+          "input_per_million": 0.22,
+          "output_per_million": 0.88
+        },
+        "nova-pro-latency-optimized": {
+          "display_name": "Bedrock Nova Pro Latency Optimized",
+          "input_per_million": 1.0,
+          "output_per_million": 4.0
+        },
+        "llama-3-70b": {
+          "display_name": "Bedrock Llama 3 70B",
+          "input_per_million": 2.65,
+          "output_per_million": 3.5
+        }
+      }
+    },
+    "claude": {
+      "display_name": "Anthropic Claude",
+      "models": {
+        "opus-5": {
+          "display_name": "Claude Opus 5",
+          "input_per_million": 5.0,
+          "output_per_million": 25.0
+        },
+        "sonnet-5": {
+          "display_name": "Claude Sonnet 5",
+          "input_per_million": 2.0,
+          "output_per_million": 10.0
+        },
+        "sonnet-5-2026-09": {
+          "display_name": "Claude Sonnet 5 (Sep)",
+          "input_per_million": 3.0,
+          "output_per_million": 15.0
+        },
+        "haiku-4.5": {
+          "display_name": "Claude Haiku 4.5",
+          "input_per_million": 1.0,
+          "output_per_million": 5.0
+        }
+      }
+    },
+    "deepseek": {
+      "display_name": "DeepSeek (direct)",
+      "models": {
+        "deepseek-v4-flash-cache-miss": {
+          "display_name": "DeepSeek Flash",
+          "input_per_million": 0.14,
+          "output_per_million": 0.28
+        },
+        "deepseek-v4-flash-cache-hit": {
+          "display_name": "DeepSeek Flash (cached)",
+          "input_per_million": 0.0028,
+          "output_per_million": 0.28
+        },
+        "deepseek-v4-pro-cache-miss": {
+          "display_name": "DeepSeek Pro",
+          "input_per_million": 0.435,
+          "output_per_million": 0.87
+        },
+        "deepseek-v4-pro-cache-hit": {
+          "display_name": "DeepSeek Pro (cached)",
+          "input_per_million": 0.003625,
+          "output_per_million": 0.87
+        }
+      }
+    }
+  }
+}
