@@ -55,6 +55,31 @@ Required` label to a PR to opt DeepSeek into a stronger model with a larger
 token budget. Approved PRs may get non-blocking follow-ups auto-filed as
 issues labeled `ai-suggested`.
 
+## Repository Automation
+
+This repository uses the shared
+[`cicaid-devtools`](https://github.com/leonarduk/cicaid) package for local
+issue, pull-request, and review automation. Install the development dependencies
+from the repository root:
+
+```bash
+python -m pip install -r requirements-dev.txt
+```
+
+Run `cicaid --help` to see all available commands. Common tasks include:
+
+```bash
+cicaid sync-issues
+cicaid work-on-issue 81
+cicaid local-review
+cicaid commit-and-push
+cicaid publish-pr
+```
+
+The package is pinned in `requirements-dev.txt`, and Python CI installs it and
+runs a CLI smoke check. Repository automation should be added to the shared
+package rather than copied into a local `scripts/developer_tools/` directory.
+
 ## Code of Conduct
 
 Please be respectful and constructive. This is a learning repository, not a production system. Comments like "you should just use library X" without context aren't helpful - explain the trade-offs!

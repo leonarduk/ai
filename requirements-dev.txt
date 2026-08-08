@@ -1,0 +1,12 @@
+# Shared repository automation. Keep this pinned to a published cicaid release so
+# local development and CI use the same issue/PR/review commands.
+cicaid-devtools @ https://github.com/leonarduk/cicaid/releases/download/v0.4.7/cicaid_devtools-0.4.7-py3-none-any.whl
+
+# Tools used by .github/workflows/python-ci.yml.
+bandit
+black
+flake8
+pytest
+pytest-asyncio
+pytest-cov
+safety
