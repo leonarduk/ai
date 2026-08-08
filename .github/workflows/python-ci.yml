@@ -20,10 +20,13 @@ jobs:
       with:
         python-version: '3.11'
 
-    - name: Install linting tools
+    - name: Install development tools
       run: |
         python -m pip install --upgrade pip
-        pip install flake8 black
+        pip install -r requirements-dev.txt
+
+    - name: Verify shared repository automation
+      run: cicaid --help
 
     - name: Run flake8
       run: |
@@ -52,10 +55,10 @@ jobs:
       with:
         python-version: ${{ matrix.python-version }}
 
-    - name: Install shared test tooling
+    - name: Install development tools
       run: |
         python -m pip install --upgrade pip
-        pip install pytest pytest-cov pytest-asyncio
+        pip install -r requirements-dev.txt
 
     - name: Run each project's test suite in isolation
       run: |
@@ -128,10 +131,10 @@ jobs:
       with:
         python-version: '3.11'
 
-    - name: Install security tools
+    - name: Install development tools
       run: |
         python -m pip install --upgrade pip
-        pip install bandit safety
+        pip install -r requirements-dev.txt
 
     - name: Run bandit security scan
       run: |
