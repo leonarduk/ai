@@ -17,6 +17,34 @@ This doc keeps the original idea — specialised agents catch more than one
 generalist model — but sequences it so each milestone ships something
 runnable, starting from a single process before any networking exists.
 
+## Alternatives considered
+
+[ed-donner/agents' `engineering_team` example](https://github.com/ed-donner/agents/tree/main/3_crewai/reference/engineering_team)
+does something structurally similar (Lead/Backend/Frontend/Test agents,
+sequential pipeline, one model per role) on top of CrewAI — YAML-configured
+agents/tasks, built-in tracing, task-dependency wiring via `context:`.
+Considered and rejected as the framework for this project:
+
+- Every existing project in this repo (`05-prize-draw-orchestrator` in
+  particular) is a hand-rolled `LLMProvider`/`cli.py`/flat-module setup with
+  no agent-orchestration framework. Adopting CrewAI here would make this the
+  one project with a fundamentally different dependency shape and mental
+  model from everything else in `projects/`, for a pipeline that's simple
+  enough (Coder → Reviewer → Verifier, sequential, three roles) not to need
+  it.
+- CrewAI's value — YAML-declared agents/tasks, hierarchical process,
+  built-in tracing — pays off more as team size and task-graph complexity
+  grow. M1/M2 here are a fixed three/four-role sequential pipeline; a
+  framework built for arbitrary crews is overhead until (if ever) the
+  pipeline actually needs that flexibility.
+
+Their agent/task split is also solving a different problem — decomposing a
+*greenfield app build from requirements* (design → backend → frontend →
+tests) — versus this project's *patch an existing repo* (bugfix/feature/
+refactor), so the role split doesn't transfer directly. What does transfer:
+their sandbox-tool design (see `workspace.py` below) and their use of an
+MCP doc-lookup tool to cut hallucinated APIs (see M3).
+
 ## Goals
 
 - Higher-quality patches than a single unreviewed model call: a Coder
@@ -78,6 +106,18 @@ of first.
 - **`workspace.py`** — applies a diff inside a scratch git branch/worktree,
   runs the configured test/lint command, reports pass/fail, rolls back on
   failure. No LLM involved.
+
+  Diff application is the least reliable part of this loop (see 'Open
+  questions'). `ed-donner/agents`' `engineering_team` example sidesteps the
+  problem entirely: its agents get flat `list/read/write/run` sandbox tools
+  and the Coder just writes whole files, no diff involved. We can't fully
+  adopt that — we're patching an existing repo, not writing into a fresh
+  scratch directory, so the git-branch isolation stays — but the same
+  full-file-write fallback belongs in `workspace.py`: for files under a
+  size threshold, let the Coder return complete file contents instead of a
+  diff, write them directly inside the scratch branch, and let `git diff`
+  show the resulting change. Reserve unified-diff parsing for files too
+  large to round-trip whole.
 - **`orchestrator.py`** — runs Coder → (Reviewer) → Verifier, loops back to
   Coder with the failure output for a bounded number of revisions, returns a
   final bundle (patch, review summary, test status, risk level).
@@ -151,7 +191,14 @@ run history, and a risk-level summary in the CLI output.
 **M3 — Stretch: remote agents + dashboard.** Only if M1/M2 prove useful in
 practice. A minimal HTTP boundary (FastAPI) so Reviewer/Verifier can run on
 a second machine, plus a read-only dashboard over the SQLite history. VS
-Code integration is a spike, not a committed deliverable.
+Code integration is a spike, not a committed deliverable. Also: give the
+Coder/Reviewer an MCP doc-lookup tool (e.g. Context7, same idea as
+`engineering_team`'s design-lead agent) so they can check current library
+APIs instead of relying on training-data recall — directly targets the
+"reduce hallucinated API calls" goal, which nothing in M1/M2 actually
+addresses yet. Stretch-tier because it depends on this repo's MCP tool
+access being wired up for a standalone script, not just for editor/agent
+sessions.
 
 ## Open questions
 
