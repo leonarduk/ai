@@ -75,6 +75,14 @@ implements the highest-leverage piece of this design:
   LAN machines, once cloud tokens (and Aider's own cloud-model use) are no
   longer an option.
 
+This is also why Aider isn't purely an external comparison point: it's
+pluggable *as* this project's Coder backend (see 'Pluggable Coder
+backends' under Architecture), so we don't have to re-solve diff/edit-
+format reliability ourselves. #106 still runs Aider standalone as one of
+its benchmark arms — that answers "does our Reviewer/scheduling layer add
+anything over Aider alone," which is a different question from "which
+Coder backend should we default to."
+
 ## Goals
 
 - **Primary use case: keep coding when cloud token budget is exhausted.**
@@ -174,6 +182,39 @@ failure mode than `localhost`, and the existing `OllamaProvider` error
 message ("Is `ollama serve` running?") should be extended to suggest
 checking network reachability too.
 
+### Pluggable Coder backends
+
+`agents/coder.py` defines a `Coder` protocol — `propose(workspace_dir,
+task, files) -> str` (a unified diff or full-file content, see below) —
+with two implementations, selected via `CODER_BACKEND=native|aider`:
+
+- **`NativeCoder`** (default) — the LLM-direct approach described
+  throughout this doc: prompts the configured model, returns a diff or
+  full-file body per the size-threshold rule below.
+- **`AiderCoder`** — shells out to `aider --yes --no-auto-commits
+  --message "<task>" <files>` inside the scratch branch/worktree that
+  `workspace.py` already prepared, then reads the result back via `git
+  diff` rather than parsing Aider's own output. `--no-auto-commits`
+  matters specifically because Aider commits directly to the current
+  branch by default, which would fight our scratch-branch isolation model
+  (see `workspace.py` below) — we want Aider's edits sitting as uncommitted
+  changes in the scratch branch, exactly like `NativeCoder`'s output, so
+  `orchestrator.py` and `history.py` don't need to know which backend ran.
+
+Both backends produce the same thing from `workspace.py`'s perspective — a
+diff sitting in the scratch branch — so Reviewer, Verifier, the revision
+loop, and multi-PC routing are entirely backend-agnostic. This also means
+`CODER_BACKEND` can be a benchmark parameter, not just a runtime choice:
+#106's "Aider standalone" arm and this project's "Coder+Verifier" arm can
+share the same harness with `CODER_BACKEND=aider` vs `native`, rather than
+needing separate integration code for each.
+
+Coupling to Aider's CLI is a real dependency risk worth naming here: Aider
+ships fast and its flags/output have changed across versions before.
+Shelling out to the CLI (rather than importing its internal Python API) is
+the more stable integration point, and `AiderCoder` should pin a tested
+Aider version in `requirements.txt` rather than floating on latest.
+
 ### Components
 
 - **`llm_client.py`** — generalises `05-prize-draw-orchestrator/llm_providers.py`'s
@@ -187,8 +228,11 @@ checking network reachability too.
   workspace root, test/lint command — same shape as
   `05-prize-draw-orchestrator/config.py`, extended with the per-role host so
   roles can be pinned to different PCs (see 'Multiple local PCs').
-- **`agents/coder.py`** — builds a prompt from task description + file
-  contents, asks the LLM for a unified diff + explanation.
+- **`agents/coder.py`** — defines the `Coder` protocol and `NativeCoder`:
+  builds a prompt from task description + file contents, asks the LLM for
+  a unified diff + explanation.
+- **`agents/coder_aider.py`** — `AiderCoder`, the Aider-backed
+  implementation of the same protocol (see 'Pluggable Coder backends').
 - **`agents/reviewer.py`** (M2) — reviews a diff for correctness/API misuse/
   style, returns structured comments + a risk level.
 - **`workspace.py`** — applies a diff inside a scratch git branch/worktree,
@@ -277,7 +321,8 @@ projects/07-multi-agent-coder/
   orchestrator.py
   history.py                # M2
   agents/
-    coder.py
+    coder.py                 # Coder protocol + NativeCoder
+    coder_aider.py            # AiderCoder backend
     reviewer.py              # M2
   docs/
     design.md                # this file
@@ -336,6 +381,10 @@ be dataclasses talking to themselves — pushed out until M3 designs the API.
   - Ollama unreachable, a malformed diff, and a target file outside the
     task's declared file list all produce a clear CLI error naming the
     cause — never a raw traceback or a silent no-op.
+  - `CODER_BACKEND=native` and `CODER_BACKEND=aider` both run through the
+    same `orchestrator.py`/`workspace.py` path with no backend-specific
+    branching outside `agents/coder.py` / `agents/coder_aider.py` — this is
+    what lets #106 benchmark them through one harness.
 
 **M2 — Reviewer + multi-provider + multi-PC + history.** Adds the Reviewer
 role, per-role model/provider/host config (including opt-in DeepSeek/Claude
@@ -406,3 +455,7 @@ doesn't exist yet and should be scoped as part of #105.
   assuming diff application will just work.
 - Revision loop bound: needs a default (e.g. 3 attempts) exposed via config,
   not hardcoded, so it can be tuned per task difficulty.
+- Aider version coupling: `AiderCoder` shells out to a CLI whose flags and
+  output have changed across releases. Pin a tested version in
+  `requirements.txt` and treat an Aider upgrade as a change that needs
+  re-testing `AiderCoder`, not a routine dependency bump.
