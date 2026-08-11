@@ -47,6 +47,13 @@ MCP doc-lookup tool to cut hallucinated APIs (see M3).
 
 ## Goals
 
+- **Primary use case: keep coding when cloud token budget is exhausted.**
+  This isn't meant to out-perform Claude/DeepSeek with tokens available —
+  when those are exhausted, the honest alternative is a single local model
+  with no scaffolding at all, and *that's* the bar this needs to clear, not
+  a fully-tokened cloud session. See issue #106: validate this against a
+  single-model baseline (and against Aider, which already implements the
+  execution-feedback loop) before building out the rest of the pipeline.
 - Higher-quality patches than a single unreviewed model call: a Coder
   proposes, a Verifier proves (tests/lint), a Reviewer critiques.
 - Run entirely on local hardware by default (Ollama); cloud providers
