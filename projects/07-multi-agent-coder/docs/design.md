@@ -56,15 +56,24 @@ MCP doc-lookup tool to cut hallucinated APIs (see M3).
   `local-7b` / `local-14b` / `haiku` / `sonnet` / `opus` sizing this repo
   already uses to label GitHub issues applies naturally to picking which
   model handles which agent role.
+- Use whatever local compute is available across the user's LAN, not just
+  the machine running the orchestrator: each agent role can point at an
+  Ollama instance on a different PC. One 8GB-GPU box only fits one 14B
+  model at a time; a second or third PC each running their own `ollama
+  serve` removes that ceiling without needing any cloud provider. See
+  'Multiple local PCs' under Architecture.
 - Every milestone is a working CLI tool, not a service that needs the next
   milestone to be useful.
 
 ## Non-goals (for now)
 
-- Multi-PC networked deployment — deferred to a stretch milestone. One
-  8GB-GPU machine can't run Coder + Reviewer concurrently anyway; the
-  pipeline is sequential by construction, so a second machine buys nothing
-  until agents actually need to overlap.
+- Running our *own* agent code (not just the LLM call) on a second
+  machine — i.e. an actual Coder/Reviewer/Verifier process listening on a
+  network port, per the original spec's orchestrator/agent-service split —
+  deferred to the M3 stretch milestone. This is a different, harder problem
+  than pointing a role at a remote Ollama host: it means designing a wire
+  protocol, handling partial failures across machines, etc. Nothing here
+  blocks using multiple PCs for their Ollama models today (see Goals).
 - Postgres/Redis — SQLite is enough for one user's task history.
 - VS Code extension / production web UI — spike only, if time allows.
 
@@ -83,10 +92,43 @@ task description + target files
         └─────────────────────────────┘
 ```
 
-M2 inserts a Reviewer pass between Coder and Verifier. M3 (stretch) is the
-only milestone that touches networking, and only to let Reviewer/Verifier
-run on a second machine — the original spec's idea, attempted last instead
-of first.
+M2 inserts a Reviewer pass between Coder and Verifier. The pipeline itself
+stays a single Python process throughout M1/M2 — what can already be
+distributed across machines starting in M2 is which Ollama instance each
+role's *model* calls hit (see 'Multiple local PCs' below), which needs no
+networking code of our own since Ollama already serves its API over the
+LAN. M3 (stretch) is the only milestone that runs our own agent *code* on
+a second machine — the original spec's orchestrator/agent-service split,
+attempted last instead of first.
+
+### Multiple local PCs
+
+Ollama already listens on the network when started with
+`OLLAMA_HOST=0.0.0.0 ollama serve` (or the Windows service equivalent), so
+using a second or third PC's model doesn't need any code beyond pointing
+`OllamaProvider.host` at that machine's address instead of `localhost`.
+`config.py` gives each role its own host, not just its own model:
+
+```
+CODER_OLLAMA_HOST=http://pc-a.local:11434
+CODER_MODEL=qwen2.5-coder:14b-instruct-q4_K_M
+
+REVIEWER_OLLAMA_HOST=http://pc-b.local:11434
+REVIEWER_MODEL=qwen2.5-coder:7b-instruct-q4_K_M
+```
+
+Each PC still only fits one resident 14B model at a time (see
+[`docs/ollama_setup_guide.md`](../../../docs/ollama_setup_guide.md)), so
+this is what actually lifts that per-machine ceiling — Coder and Reviewer
+can now run on different GPUs instead of time-sharing one. Two things this
+still doesn't need: our own network protocol (Ollama's HTTP API is the
+transport) or the M3 remote-agent work (the *Python logic* for each role
+still runs on the orchestrator's machine; only the model inference call
+crosses the network). Per-role timeouts should be generous and
+independently configurable — a LAN PC under load or asleep is a more likely
+failure mode than `localhost`, and the existing `OllamaProvider` error
+message ("Is `ollama serve` running?") should be extended to suggest
+checking network reachability too.
 
 ### Components
 
@@ -96,9 +138,11 @@ of first.
   `generate_json` passthrough for structured results (test-result summaries,
   risk level). Same three backends: `OllamaProvider` (default, local-only),
   `DeepSeekProvider`, `ClaudeProvider`.
-- **`config.py`** — per-role model/provider selection (`CODER_MODEL`,
-  `REVIEWER_MODEL`, etc.), workspace root, test/lint command — same shape as
-  `05-prize-draw-orchestrator/config.py`.
+- **`config.py`** — per-role model/provider/host selection (`CODER_MODEL`,
+  `CODER_OLLAMA_HOST`, `REVIEWER_MODEL`, `REVIEWER_OLLAMA_HOST`, etc.),
+  workspace root, test/lint command — same shape as
+  `05-prize-draw-orchestrator/config.py`, extended with the per-role host so
+  roles can be pinned to different PCs (see 'Multiple local PCs').
 - **`agents/coder.py`** — builds a prompt from task description + file
   contents, asks the LLM for a unified diff + explanation.
 - **`agents/reviewer.py`** (M2) — reviews a diff for correctness/API misuse/
@@ -184,21 +228,25 @@ be dataclasses talking to themselves — pushed out until M3 designs the API.
 patch either passes tests within N revisions or the run reports failure with
 the last diff and test output.
 
-**M2 — Reviewer + multi-provider + history.** Adds the Reviewer role,
-per-role model/provider config (including opt-in DeepSeek/Claude), SQLite
+**M2 — Reviewer + multi-provider + multi-PC + history.** Adds the Reviewer
+role, per-role model/provider/host config (including opt-in DeepSeek/Claude
+and pointing individual roles at Ollama instances on other LAN PCs), SQLite
 run history, and a risk-level summary in the CLI output.
 
-**M3 — Stretch: remote agents + dashboard.** Only if M1/M2 prove useful in
-practice. A minimal HTTP boundary (FastAPI) so Reviewer/Verifier can run on
-a second machine, plus a read-only dashboard over the SQLite history. VS
-Code integration is a spike, not a committed deliverable. Also: give the
-Coder/Reviewer an MCP doc-lookup tool (e.g. Context7, same idea as
-`engineering_team`'s design-lead agent) so they can check current library
-APIs instead of relying on training-data recall — directly targets the
-"reduce hallucinated API calls" goal, which nothing in M1/M2 actually
-addresses yet. Stretch-tier because it depends on this repo's MCP tool
-access being wired up for a standalone script, not just for editor/agent
-sessions.
+**M3 — Stretch: remote agent processes + dashboard.** Only if M1/M2 prove
+useful in practice. Unlike M2's multi-PC support (routing a role's *model*
+calls to another machine, no new networking code), this is about running
+our own Coder/Reviewer/Verifier *code* on a second machine — a minimal HTTP
+boundary (FastAPI) between orchestrator and agent process, the original
+spec's actual architecture. Also in scope here: a read-only dashboard over
+the SQLite history; a VS Code integration spike (not a committed
+deliverable); and giving the Coder/Reviewer an MCP doc-lookup tool (e.g.
+Context7, same idea as `engineering_team`'s design-lead agent) so they can
+check current library APIs instead of relying on training-data recall —
+directly targets the "reduce hallucinated API calls" goal, which nothing in
+M1/M2 actually addresses yet. Stretch-tier because it depends on this
+repo's MCP tool access being wired up for a standalone script, not just for
+editor/agent sessions.
 
 ## Open questions
 
