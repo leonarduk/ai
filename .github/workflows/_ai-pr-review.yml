@@ -4,26 +4,21 @@ on:
   workflow_call:
     inputs:
       provider_name:
-        description: "Display name of the reviewer (e.g. Claude, GPT)"
+        description: "Display name of the reviewer (e.g. DeepSeek, GPT)"
         required: true
         type: string
       provider_id:
-        description: "Lowercase identifier used for file/output naming (e.g. claude, gpt)"
+        description: "Lowercase identifier used for file/output naming (e.g. deepseek, gpt)"
         required: true
         type: string
-      review_script:
-        description: "Path to the provider's review script"
+      review_module:
+        description: "Dotted module name of the provider's review integration (e.g. cicaid_devtools.lib.deepseek_review)"
         required: true
         type: string
       workflow_file:
         description: "Filename of the calling workflow, used in the posted comment link"
         required: true
         type: string
-      anthropic_max_tokens:
-        description: "ANTHROPIC_MAX_TOKENS override passed to the review script, if any"
-        required: false
-        type: string
-        default: ""
       deepseek_model:
         description: "DEEPSEEK_MODEL override passed to the review script, if any"
         required: false
@@ -40,13 +35,6 @@ on:
         type: string
         default: ""
     secrets:
-      anthropic_api_key:
-        # Not required: a DeepSeek- or GPT-only setup (no Claude key) must still be able
-        # to invoke this reusable workflow. Individual scripts that need this key
-        # (claude_review.py, and create_followup_issues.py when FOLLOWUP_LLM_PROVIDER=claude)
-        # fail with a clear error via review_common.get_required_env() if it's unset but needed.
-        description: "Anthropic API key, used for Claude reviews and follow-up issue creation"
-        required: false
       openai_api_key:
         description: "OpenAI API key, used for GPT reviews"
         required: false
@@ -57,11 +45,9 @@ on:
         description: "Token used for gh CLI calls (PR/issue read and write)"
         required: true
 
-# github.workflow resolves to the *calling* workflow's name (Claude/DeepSeek/GPT
-# PR Review), so this groups per-provider without cross-cancelling other
-# providers' runs for the same PR. Mirrors the pattern in deepseek-pr-review.yml
-# (#4719): only one job here with no side effects other workflows depend on, so
-# cancelling an in-progress run is safe.
+# github.workflow resolves to the *calling* workflow's name (DeepSeek/GPT PR
+# Review), so this groups per-provider without cross-cancelling other
+# providers' runs for the same PR.
 concurrency:
   group: ${{ github.workflow }}-${{ github.event.pull_request.number }}
   cancel-in-progress: true
@@ -79,6 +65,14 @@ jobs:
       - uses: actions/checkout@v7
         with:
           fetch-depth: 0
+
+      - name: Set up Python
+        uses: actions/setup-python@v7
+        with:
+          python-version: '3.12'
+
+      - name: Install cicaid-devtools
+        run: python -m pip install "cicaid-devtools @ https://github.com/leonarduk/cicaid/releases/download/v0.7.8/cicaid_devtools-0.7.8-py3-none-any.whl"
 
       - name: Get linked issue body
         id: issue
@@ -108,7 +102,7 @@ jobs:
           ISSUE_BODY: ${{ steps.issue.outputs.body }}
         run: |
           git fetch origin "$BASE_REF"
-          DIFF=$(python3 .github/scripts/prepare_review_diff.py \
+          DIFF=$(python3 -m cicaid_devtools.lib.review_diff \
             --base-ref "$BASE_REF" \
             --pr-title "$PR_TITLE" \
             --issue-body "$ISSUE_BODY")
@@ -129,7 +123,7 @@ jobs:
           if [ -n "$DISCUSSION_MAX_CHARS" ]; then
             MAX_CHARS_ARGS=(--max-chars "$DISCUSSION_MAX_CHARS")
           fi
-          DISCUSSION=$(python3 .github/scripts/prepare_review_discussion.py \
+          DISCUSSION=$(python3 -m cicaid_devtools.lib.review_discussion \
             --repo "${{ github.repository }}" \
             --pr-number "${{ github.event.pull_request.number }}" \
             --provider-name "${{ inputs.provider_name }}" \
@@ -146,7 +140,7 @@ jobs:
         env:
           DIFF_OUTPUT: ${{ steps.diff.outputs.diff }}
         run: |
-          VERIFIED=$(python3 .github/scripts/extract_verified_symbols.py \
+          VERIFIED=$(python3 -m cicaid_devtools.lib.verified_symbols \
             --diff "$DIFF_OUTPUT")
           DELIM="EOF_$(uuidgen | tr -d '-')"
           {
@@ -157,10 +151,8 @@ jobs:
 
       - name: Call ${{ inputs.provider_name }} API
         env:
-          ANTHROPIC_API_KEY: ${{ secrets.anthropic_api_key }}
           OPENAI_API_KEY: ${{ secrets.openai_api_key }}
           DEEPSEEK_API_KEY: ${{ secrets.deepseek_api_key }}
-          ANTHROPIC_MAX_TOKENS: ${{ inputs.anthropic_max_tokens }}
           DEEPSEEK_MODEL: ${{ inputs.deepseek_model }}
           DEEPSEEK_MAX_TOKENS: ${{ inputs.deepseek_max_tokens }}
           PR_TITLE: ${{ github.event.pull_request.title }}
@@ -169,12 +161,11 @@ jobs:
           DISCUSSION: ${{ steps.discussion.outputs.text }}
           VERIFIED_FACTS: ${{ steps.verified.outputs.facts }}
         run: |
-          python3 ${{ inputs.review_script }} > /tmp/${{ inputs.provider_id }}_review_body.md
+          python3 -m ${{ inputs.review_module }} > /tmp/${{ inputs.provider_id }}_review_body.md
 
           # Guard: `-s` returns true only if the file exists AND has size > 0.
           # This distinguishes a successful API response (review body written to stdout)
           # from a failure (empty output, missing file, or API error).
-          # See docs/AI_REVIEW_WORKFLOWS.md for details.
           if [ ! -s /tmp/${{ inputs.provider_id }}_review_body.md ]; then
             echo "ERROR: ${{ inputs.provider_name }} review output was empty" >&2
             exit 1
@@ -184,8 +175,18 @@ jobs:
         id: check_approval
         continue-on-error: true  # REQUEST CHANGES exits 1; allow later steps (post comment, create issues) to still run
         run: |
-          if python3 .github/scripts/extract_verdict.py /tmp/${{ inputs.provider_id }}_review_body.md "${{ inputs.provider_name }}"; then
+          set +e
+          python3 -m cicaid_devtools.lib.verdict /tmp/${{ inputs.provider_id }}_review_body.md "${{ inputs.provider_name }}"
+          verdict_exit=$?
+          set -e
+
+          # Exit codes from extract_verdict.py: 0 = APPROVE, 2 = provider outage
+          # (soft-fail, doesn't block merge), anything else = REQUEST CHANGES /
+          # missing verdict (hard fail).
+          if [ "$verdict_exit" -eq 0 ]; then
             echo "approved=true" >> "$GITHUB_OUTPUT"
+          elif [ "$verdict_exit" -eq 2 ]; then
+            echo "approved=skipped" >> "$GITHUB_OUTPUT"
           else
             echo "approved=false" >> "$GITHUB_OUTPUT"
             exit 1
@@ -199,7 +200,7 @@ jobs:
           PR_NUMBER: ${{ github.event.pull_request.number }}
           RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
         run: |
-          bash .github/scripts/build_review_comment.sh /tmp/${{ inputs.provider_id }}_review_body.md \
+          python3 -m cicaid_devtools.lib.review_comment /tmp/${{ inputs.provider_id }}_review_body.md \
             "${{ inputs.provider_name }}" "${{ inputs.workflow_file }}" "$RUN_URL" > /tmp/${{ inputs.provider_id }}_comment_body.md
 
           # Write to Actions job summary so the review is always visible in the UI,
@@ -217,10 +218,10 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.gh_token }}
           PR_NUMBER: ${{ github.event.pull_request.number }}
-          ANTHROPIC_API_KEY: ${{ secrets.anthropic_api_key }}
           OPENAI_API_KEY: ${{ secrets.openai_api_key }}
           DEEPSEEK_API_KEY: ${{ secrets.deepseek_api_key }}
           FOLLOWUP_LLM_PROVIDER: ${{ vars.FOLLOWUP_LLM_PROVIDER }}
+          REPO_NAME: ${{ github.event.repository.name }}
         run: |
           # Fetch existing label names once and only create the ones missing,
           # instead of firing a gh label create call (and eating a 422) for
@@ -238,17 +239,11 @@ jobs:
           create_label_if_missing "haiku" "C5DEF5" "Suitable for Claude Haiku (simple/mechanical task)"
           create_label_if_missing "sonnet" "BFD4F2" "Suitable for Claude Sonnet (moderate reasoning)"
           create_label_if_missing "opus" "0052CC" "Suitable for Claude Opus (complex design/architecture)"
-          # local-7b/local-14b are also valid tiers in create_followup_issues.py's prompt
-          # (llm_labels.LLM_TIER_MAP) even though this workflow's own review prompts don't
-          # request them; missing either label makes `gh issue create --label local-7b` fail
-          # outright and previously crashed the whole follow-up batch (see PR #6 CI run).
-          create_label_if_missing "local-7b" "0e8a16" "Doable by a local LLM (qwen2.5-coder:7b)"
-          create_label_if_missing "local-14b" "1d76db" "Doable by a local LLM (qwen2.5-coder:14b); too hard for 7b"
 
           # Extract titles to a file, then create issues via Python subprocess (no shell injection)
-          python3 .github/scripts/extract_followups.py /tmp/${{ inputs.provider_id }}_review_body.md \
+          python3 -m cicaid_devtools.lib.followups /tmp/${{ inputs.provider_id }}_review_body.md \
             > /tmp/followups.json
-          python3 .github/scripts/create_followup_issues.py \
+          python3 -m cicaid_devtools.lib.followup_issues \
             /tmp/followups.json "${PR_NUMBER}" /tmp/${{ inputs.provider_id }}_review_body.md
 
       - name: Add 'Changes Requested' label if review failed
