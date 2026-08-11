@@ -45,6 +45,36 @@ refactor), so the role split doesn't transfer directly. What does transfer:
 their sandbox-tool design (see `workspace.py` below) and their use of an
 MCP doc-lookup tool to cut hallucinated APIs (see M3).
 
+### Comparison to Aider
+
+The more relevant "why not just use an existing tool" question is Aider,
+not CrewAI — it's a single CLI against one model, and it already
+implements the highest-leverage piece of this design:
+
+- **Aider already has an execution-feedback loop** (`--auto-test`): it runs
+  your tests after an edit and feeds failures back to the model. That's
+  this project's Coder → Verifier loop, shipped and battle-tested. We are
+  not claiming to do that better — issue #106 benchmarks our loop against
+  Aider on the same tasks specifically because Aider is the bar to clear,
+  not a strawman.
+- **Aider already supports a two-model split** (architect/editor: one model
+  plans, another formats the edit), which is most of what Coder/Verifier
+  buys structurally. What Aider doesn't have: a distinct LLM *critique*
+  pass (the Reviewer role) — untested value, see #106 — and no built-in way
+  to pin different roles to different Ollama hosts on the LAN (see
+  'Multiple local PCs').
+- **Where the revision loop differs:** Aider's loop is Coder-only —
+  test failure text goes straight back to the same model that wrote the
+  edit. This project's loop (M2 onward) also inserts Reviewer comments
+  into that feedback before the next Coder attempt (see 'Revision loop
+  feedback signals' below) — an extra signal Aider's loop doesn't have,
+  again unproven until #106 says it helps.
+- **Why build this instead of just using Aider:** per the Goals section,
+  the actual reason isn't "better than Aider" — it's needing a tool that
+  keeps working, unattended, across multiple local models and multiple
+  LAN machines, once cloud tokens (and Aider's own cloud-model use) are no
+  longer an option.
+
 ## Goals
 
 - **Primary use case: keep coding when cloud token budget is exhausted.**
@@ -108,6 +138,13 @@ LAN. M3 (stretch) is the only milestone that runs our own agent *code* on
 a second machine — the original spec's orchestrator/agent-service split,
 attempted last instead of first.
 
+**M2 vs M3, at a glance — two different things both called "remote":**
+
+| | What crosses the network | New code required | Milestone |
+|---|---|---|---|
+| Remote **model** | One `chat()` call's prompt/response | None — Ollama already serves HTTP | M2 |
+| Remote **agent** | The role's whole Python process (prompt-building, retries, tool calls) | A wire protocol (FastAPI), health checks, partial-failure handling | M3 |
+
 ### Multiple local PCs
 
 Ollama already listens on the network when started with
@@ -168,13 +205,64 @@ checking network reachability too.
   size threshold, let the Coder return complete file contents instead of a
   diff, write them directly inside the scratch branch, and let `git diff`
   show the resulting change. Reserve unified-diff parsing for files too
-  large to round-trip whole.
+  large to round-trip whole. The exact size threshold is a tuning
+  parameter, not a design decision — pick a starting value (e.g. a few
+  hundred lines) in the #93 implementation and adjust from real failures
+  rather than guessing it here.
+
+  A diff is malformed, not just "the model was wrong," when it fails to
+  parse as unified-diff syntax, references line numbers or context that
+  don't match the target file, or touches a file outside the task's
+  declared file list. `workspace.py` should detect these *before* handing
+  anything to `git apply` (a hunk-context mismatch should fail fast with a
+  clear reason, not surface as a cryptic `git apply` error) and the failure
+  reason — not just "failed" — is part of what gets fed back to the Coder
+  for the next revision (see below) and shown to the CLI user on final
+  failure.
 - **`orchestrator.py`** — runs Coder → (Reviewer) → Verifier, loops back to
   Coder with the failure output for a bounded number of revisions, returns a
   final bundle (patch, review summary, test status, risk level).
 - **`cli.py`** — `multiagent-coder run --task "..." --files a.py b.py`.
 - **`history.py`** (M2) — SQLite log of each run: task, patches attempted,
   review comments, test results, so past runs are inspectable.
+
+### Agent responsibilities (hypotheses, pending #106)
+
+These are starting points for the M1/M2 implementation issues, not settled
+requirements — #106 tests whether the Reviewer role earns its place at
+all, so treat its bullet as provisional:
+
+- **Coder** must guarantee its output is either a syntactically valid
+  unified diff or a complete file body (see the full-file-write fallback
+  above) — never prose mixed into the patch — and must restate which
+  files it touched so `workspace.py` can reject anything outside the
+  task's declared file list before applying it.
+- **Reviewer** (M2) checks the diff for API misuse, obvious logic errors,
+  and style, and must return a structured risk level (low/medium/high),
+  not just free text — the orchestrator needs a value it can act on
+  (e.g. surface a warning) without re-parsing prose.
+- **Verifier** runs the configured test/lint command and reports a
+  structured result — pass/fail, which command ran, and the raw
+  stdout/stderr — not an LLM's summary of the output. No model sees test
+  output before the Coder does; the Verifier's job is capture, not
+  interpretation.
+
+### Revision loop feedback signals
+
+On a failed Verifier run, `orchestrator.py` feeds back to the next Coder
+attempt:
+
+- The **raw test/lint output** from the Verifier, unmodified — the Coder
+  sees exactly what failed, not a paraphrase.
+- The **diff-application failure reason**, if the previous attempt's diff
+  didn't apply cleanly (see the malformed-diff detection above) — distinct
+  from a test failure, since it means the Coder's patch was never actually
+  tried.
+- **Reviewer comments** (M2 onward), appended alongside the test output —
+  so a revision responds to both "this failed" and "this looks risky."
+  Whether this measurably changes outcomes vs. Verifier feedback alone is
+  exactly what #106 needs to answer before M2's Reviewer work is treated
+  as load-bearing rather than optional.
 
 ### Repo layout
 
@@ -231,14 +319,36 @@ be dataclasses talking to themselves — pushed out until M3 designs the API.
 
 ## Milestones
 
-**M1 — Single-process MVP.** Coder → Verifier loop, Ollama only, CLI. A
-patch either passes tests within N revisions or the run reports failure with
-the last diff and test output.
+**M1 — Single-process MVP.** Coder → Verifier loop, Ollama only, CLI.
+
+- **Done when:** issue #106's benchmark has run and its result (whatever it
+  is) is written up — M1 isn't "done" just because the code works, it's
+  done when we know whether the loop is worth continuing to M2. If #106
+  shows no measurable lift over a single unassisted local model, M1's
+  remaining scope is a stopping point to reassess, not a green light to
+  keep building.
+  - `multiagent-coder run --task "..." --files a.py b.py` produces either a
+    passing patch within the configured revision bound, or a clear failure
+    report (last diff, last test output, which attempt it stopped at).
+  - `pytest projects/07-multi-agent-coder` passes, including rollback-path
+    coverage for `workspace.py` (apply fails, tests fail, interrupted
+    mid-run — see #93).
+  - Ollama unreachable, a malformed diff, and a target file outside the
+    task's declared file list all produce a clear CLI error naming the
+    cause — never a raw traceback or a silent no-op.
 
 **M2 — Reviewer + multi-provider + multi-PC + history.** Adds the Reviewer
 role, per-role model/provider/host config (including opt-in DeepSeek/Claude
 and pointing individual roles at Ollama instances on other LAN PCs), SQLite
 run history, and a risk-level summary in the CLI output.
+
+- **Done when:** the Reviewer role is justified by #106's data (or a
+  follow-up rerun of it with Reviewer included) rather than assumed useful;
+  a role can be pointed at a different LAN host via config alone, with a
+  reachability failure on that host reported distinctly from a model-error
+  failure; `multiagent-coder history` lists past runs from SQLite; DeepSeek/
+  Claude remain opt-in with the same informed-consent documentation as
+  `05-prize-draw-orchestrator`.
 
 **M3 — Stretch: remote agent processes + dashboard.** Only if M1/M2 prove
 useful in practice. Unlike M2's multi-PC support (routing a role's *model*
@@ -247,13 +357,46 @@ our own Coder/Reviewer/Verifier *code* on a second machine — a minimal HTTP
 boundary (FastAPI) between orchestrator and agent process, the original
 spec's actual architecture. Also in scope here: a read-only dashboard over
 the SQLite history; a VS Code integration spike (not a committed
-deliverable); and giving the Coder/Reviewer an MCP doc-lookup tool (e.g.
-Context7, same idea as `engineering_team`'s design-lead agent) so they can
-check current library APIs instead of relying on training-data recall —
-directly targets the "reduce hallucinated API calls" goal, which nothing in
-M1/M2 actually addresses yet. Stretch-tier because it depends on this
-repo's MCP tool access being wired up for a standalone script, not just for
-editor/agent sessions.
+deliverable); and an MCP doc-lookup tool for the Coder/Reviewer.
+
+The MCP tool (e.g. Context7) would be queried with the library/API name a
+patch is about to call — e.g. before the Coder emits code calling a Gradio
+or requests API, it checks the tool for that library's current signature
+instead of relying on training-data recall, the same way `engineering_team`'s
+design-lead agent uses it before writing its design. This slots into
+`llm_client.py`'s existing abstraction as an optional tool the Coder/
+Reviewer's `chat()` call can invoke mid-generation, not a new provider —
+it augments what a role knows, it doesn't change how its output is
+produced or parsed. Directly targets the "reduce hallucinated API calls"
+goal, which nothing in M1/M2 actually addresses. Stretch-tier because it
+depends on this repo's MCP tool access being usable from a standalone
+script/CLI process, not just an interactive agent session — that plumbing
+doesn't exist yet and should be scoped as part of #105.
+
+## Failure modes
+
+- **Model unavailable** (Ollama not running, or a remote LAN host down) —
+  `OllamaProvider` should fail fast with a message naming which role's
+  model and host it tried, distinguishing "connection refused" (nothing
+  listening) from "timeout" (something's there but slow/overloaded).
+- **LAN PC unreachable** — a specific case of the above worth calling out
+  separately: unlike `localhost`, a remote PC being asleep, on a different
+  subnet, or blocked by a firewall rule is an expected occasional state,
+  not a bug. Per-role timeouts need to be generous enough to not misfire on
+  a slow-but-alive remote model, and the error should suggest checking
+  reachability (ping/curl the host), not just "is ollama serve running?".
+- **Malformed diffs** — see the detection notes under `workspace.py` above.
+  Surfaced to the Coder as revision feedback first; only surfaced to the
+  CLI user if every revision attempt fails the same way.
+- **Tests failing repeatedly** — once the revision bound is hit, stop and
+  report failure with the full attempt history, rather than silently
+  keeping the last (failing) diff applied. The scratch branch's changes
+  should never leak into the user's working branch on a failed run.
+- **Workspace corruption** — if `workspace.py` itself errors (e.g. the
+  scratch branch/worktree can't be created or cleaned up), that's a harder
+  failure than a bad patch: abort the run immediately rather than
+  attempting further revisions, and leave enough state (branch name, last
+  known-good commit) for the user to inspect or clean up manually.
 
 ## Open questions
 
