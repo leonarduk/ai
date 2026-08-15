@@ -33,6 +33,11 @@ jobs:
     with:
       provider_name: Claude
       provider_id: claude
+      # cicaid-devtools has no CLI entry point for Anthropic yet, so the
+      # legacy local script is used (review_script takes precedence over
+      # review_module in the shared workflow). review_module is kept as the
+      # canonical provider mapping for future module-based use.
+      review_module: cicaid_devtools.lib.anthropic_review
       review_script: .github/scripts/claude_review.py
       workflow_file: claude-pr-review.yml
       anthropic_max_tokens: "6000"
