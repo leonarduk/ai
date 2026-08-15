@@ -90,9 +90,10 @@ jobs:
           CICAID_WHEEL_SHA256: 40b407d76dd94d78f1d961bac73a3f90d57241466a6173392a0a0387ee8bdb27
         run: |
           set -euo pipefail
-          curl -fsSL "$CICAID_WHEEL_URL" -o /tmp/cicaid_devtools.whl
-          echo "$CICAID_WHEEL_SHA256  /tmp/cicaid_devtools.whl" | sha256sum -c -
-          python -m pip install /tmp/cicaid_devtools.whl
+          wheel_file="/tmp/$(basename "$CICAID_WHEEL_URL")"
+          curl -fsSL "$CICAID_WHEEL_URL" -o "$wheel_file"
+          echo "$CICAID_WHEEL_SHA256  $wheel_file" | sha256sum -c -
+          python -m pip install "$wheel_file"
 
       - name: Get linked issue body
         id: issue
