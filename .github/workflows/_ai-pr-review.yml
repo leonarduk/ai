@@ -15,6 +15,11 @@ on:
         description: "Dotted module name of the provider's review integration (e.g. cicaid_devtools.lib.deepseek_review)"
         required: true
         type: string
+      review_script:
+        description: "Path to a local provider review script for providers without a cicaid-devtools module (e.g. Claude). If set, this script is invoked instead of review_module."
+        required: false
+        type: string
+        default: ""
       workflow_file:
         description: "Filename of the calling workflow, used in the posted comment link"
         required: true
@@ -29,6 +34,11 @@ on:
         required: false
         type: string
         default: ""
+      anthropic_max_tokens:
+        description: "ANTHROPIC_MAX_TOKENS override passed to the review script, if any"
+        required: false
+        type: string
+        default: ""
       discussion_max_chars:
         description: "Max characters of PR discussion to include in the review prompt, if any (default 20000)"
         required: false
@@ -37,6 +47,9 @@ on:
     secrets:
       openai_api_key:
         description: "OpenAI API key, used for GPT reviews"
+        required: false
+      anthropic_api_key:
+        description: "Anthropic API key, used for Claude reviews (script-based providers)"
         required: false
       deepseek_api_key:
         description: "DeepSeek API key, used for DeepSeek reviews"
@@ -62,17 +75,24 @@ jobs:
       contents: read
       issues: write
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7
         with:
           fetch-depth: 0
 
       - name: Set up Python
-        uses: actions/setup-python@v7
+        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97  # v7
         with:
           python-version: '3.12'
 
       - name: Install cicaid-devtools
-        run: python -m pip install "cicaid-devtools @ https://github.com/leonarduk/cicaid/releases/download/v0.7.8/cicaid_devtools-0.7.8-py3-none-any.whl"
+        env:
+          CICAID_WHEEL_URL: https://github.com/leonarduk/cicaid/releases/download/v0.7.8/cicaid_devtools-0.7.8-py3-none-any.whl
+          CICAID_WHEEL_SHA256: 40b407d76dd94d78f1d961bac73a3f90d57241466a6173392a0a0387ee8bdb27
+        run: |
+          set -euo pipefail
+          curl -fsSL "$CICAID_WHEEL_URL" -o /tmp/cicaid_devtools.whl
+          echo "$CICAID_WHEEL_SHA256  /tmp/cicaid_devtools.whl" | sha256sum -c -
+          python -m pip install /tmp/cicaid_devtools.whl
 
       - name: Get linked issue body
         id: issue
@@ -81,7 +101,7 @@ jobs:
         run: |
           ISSUE_NUM=$(gh pr view ${{ github.event.pull_request.number }} --json body,title \
             | jq -r '[.title, .body] | join(" ")' \
-            | grep -oE '(Closes|Fixes|Refs) #[0-9]+' | head -1 | grep -oE '[0-9]+' || true)
+            | grep -oiE '(closes|fixes|resolves|refs|relates[[:space:]]+to)[[:space:]]+#[0-9]+' | head -1 | grep -oE '[0-9]+' || true)
           if [ -n "$ISSUE_NUM" ]; then
             ISSUE_BODY=$(gh issue view "$ISSUE_NUM" --json body -q .body 2>/dev/null || echo "Issue not found")
           else
@@ -149,19 +169,49 @@ jobs:
             echo "$DELIM"
           } >> "$GITHUB_OUTPUT"
 
+      - name: Validate review runner
+        env:
+          REVIEW_SCRIPT: ${{ inputs.review_script }}
+          REVIEW_MODULE: ${{ inputs.review_module }}
+        run: |
+          set -euo pipefail
+          if [ -n "$REVIEW_SCRIPT" ]; then
+            # Legacy script-based providers (e.g. Claude): only allow scripts
+            # checked into the repo under .github/scripts/.
+            case "$REVIEW_SCRIPT" in
+              .github/scripts/*) ;;
+              *) echo "ERROR: review_script must be under .github/scripts/, got '$REVIEW_SCRIPT'" >&2; exit 1 ;;
+            esac
+          else
+            # Module-based providers (DeepSeek/GPT): only allow known
+            # cicaid-devtools review modules.
+            case "$REVIEW_MODULE" in
+              cicaid_devtools.lib.deepseek_review|cicaid_devtools.lib.gpt_review) ;;
+              *) echo "ERROR: review_module '$REVIEW_MODULE' not in allowlist" >&2; exit 1 ;;
+            esac
+          fi
+
       - name: Call ${{ inputs.provider_name }} API
         env:
           OPENAI_API_KEY: ${{ secrets.openai_api_key }}
+          ANTHROPIC_API_KEY: ${{ secrets.anthropic_api_key }}
           DEEPSEEK_API_KEY: ${{ secrets.deepseek_api_key }}
+          ANTHROPIC_MAX_TOKENS: ${{ inputs.anthropic_max_tokens }}
           DEEPSEEK_MODEL: ${{ inputs.deepseek_model }}
           DEEPSEEK_MAX_TOKENS: ${{ inputs.deepseek_max_tokens }}
+          REVIEW_SCRIPT: ${{ inputs.review_script }}
+          REVIEW_MODULE: ${{ inputs.review_module }}
           PR_TITLE: ${{ github.event.pull_request.title }}
           DIFF: ${{ steps.diff.outputs.diff }}
           ISSUE_BODY: ${{ steps.issue.outputs.body }}
           DISCUSSION: ${{ steps.discussion.outputs.text }}
           VERIFIED_FACTS: ${{ steps.verified.outputs.facts }}
         run: |
-          python3 -m ${{ inputs.review_module }} > /tmp/${{ inputs.provider_id }}_review_body.md
+          if [ -n "$REVIEW_SCRIPT" ]; then
+            python3 "$REVIEW_SCRIPT" > /tmp/${{ inputs.provider_id }}_review_body.md
+          else
+            python3 -m "$REVIEW_MODULE" > /tmp/${{ inputs.provider_id }}_review_body.md
+          fi
 
           # Guard: `-s` returns true only if the file exists AND has size > 0.
           # This distinguishes a successful API response (review body written to stdout)
@@ -221,7 +271,6 @@ jobs:
           OPENAI_API_KEY: ${{ secrets.openai_api_key }}
           DEEPSEEK_API_KEY: ${{ secrets.deepseek_api_key }}
           FOLLOWUP_LLM_PROVIDER: ${{ vars.FOLLOWUP_LLM_PROVIDER }}
-          REPO_NAME: ${{ github.event.repository.name }}
         run: |
           # Fetch existing label names once and only create the ones missing,
           # instead of firing a gh label create call (and eating a 422) for

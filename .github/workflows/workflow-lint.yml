@@ -11,13 +11,21 @@ permissions:
 jobs:
   actionlint:
     runs-on: ubuntu-latest
-    continue-on-error: true
     steps:
       - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
 
       - name: Download actionlint
+        env:
+          ACTIONLINT_VERSION: "1.7.12"
+          ACTIONLINT_SHA256: 8aca8db96f1b94770f1b0d72b6dddcb1ebb8123cb3712530b08cc387b349a3d8
         run: |
-          curl -sSL https://raw.githubusercontent.com/rhysd/actionlint/main/scripts/download-actionlint.bash | bash -s -- latest /usr/local/bin
+          set -euo pipefail
+          asset="actionlint_${ACTIONLINT_VERSION}_linux_amd64.tar.gz"
+          curl -fsSL "https://github.com/rhysd/actionlint/releases/download/v${ACTIONLINT_VERSION}/${asset}" -o "/tmp/${asset}"
+          echo "${ACTIONLINT_SHA256}  /tmp/${asset}" | sha256sum -c -
+          tar -xzf "/tmp/${asset}" -C /usr/local/bin actionlint
         shell: bash
 
       - name: Lint workflow files
