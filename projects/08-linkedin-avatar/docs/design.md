@@ -194,9 +194,11 @@ prompt exceeds it, repo full-records are dropped to index lines, oldest-pushed f
 if it still doesn't fit, that's a build error, not a silent truncation. Token counts come from the
 Anthropic count-tokens endpoint, not a heuristic.
 
-The whole system prompt gets a `cache_control` breakpoint. With a ~15–25k prompt and a 10-turn
-conversation, caching is the difference between "this is a fun demo" and "I've turned it off because
-of the bill".
+The whole system prompt gets a `cache_control` breakpoint, with the **1-hour TTL** rather than the
+default 5-minute one — a visitor reading an answer and typing a follow-up routinely takes longer than
+five minutes, so the short TTL would miss on a large share of turns (§7 has the arithmetic). With a
+~15–25k prompt and a 10-turn conversation, caching is the difference between "this is a fun demo" and
+"I've turned it off because of the bill".
 
 ---
 
@@ -235,7 +237,7 @@ This is a public endpoint with my API key behind it. Four controls, all in `guar
    acceptable weakness for the threat (casual abuse), and adding Redis for this would be the tail
    wagging the dog.
 3. **Daily spend kill-switch** — accumulate `usage` from every response into a running cost estimate;
-   past `AVATAR_DAILY_BUDGET_USD` (default `1.00`) the app stops calling the API and answers with a
+   past `AVATAR_DAILY_BUDGET_USD` (default `5.00`, see §7) the app stops calling the API and answers with a
    fixed "my twin is resting — here's my LinkedIn and email" message. This is the one control that
    must be correct, because it is the only thing standing between a bored visitor and an unbounded
    bill.
@@ -256,20 +258,51 @@ about beyond one sentence.
 | | |
 |---|---|
 | Provider | Anthropic Messages API (`anthropic` Python SDK) |
-| Default model | `claude-haiku-4-5` — $1 / $5 per MTok in/out, 200K context |
-| Env override | `AVATAR_MODEL`; `claude-sonnet-5` ($3 / $15) if answer quality needs it |
-| Caching | `cache_control` on the system prompt — cache reads are billed at a fraction of input tokens |
+| Default model | `claude-sonnet-5` — $2 / $10 per MTok in/out |
+| Cost-down option | `AVATAR_MODEL=claude-haiku-4-5-20251001` — $1 / $5, half the price (see the lifecycle note) |
+| Caching | `cache_control` on the system prompt, 1-hour TTL |
 
-This is a deliberate cost-over-capability choice, not a default: the task is "answer questions from a
-20k-token brief in a consistent voice", which is squarely Haiku-shaped. The eval set (§8) is what
-decides whether that holds; if it doesn't, the fix is one environment variable.
+**Why Sonnet 5 and not Haiku.** Haiku is the obvious pick for a task that is "answer questions from a
+20k-token brief in a consistent voice", and the first draft of this design defaulted to it. Two facts
+from the model docs changed that:
 
-Rough arithmetic for sizing the budget, uncached, at Haiku prices: a 10-turn conversation with a 20k
-system prompt and ~400-token answers is on the order of 200k input + 4k output ≈ **$0.22**. Caching
-the system prompt takes the dominant term down by roughly an order of magnitude. A $1/day cap
-therefore buys a busy day's worth of genuine visitors and stops a scripted abuser cold. Confirm the
-current cache multipliers on Anthropic's pricing page when implementing the budget tracker rather
-than hard-coding a remembered number.
+- Haiku 4.5's published retirement commitment is **not sooner than 15 October 2026**. This page is
+  meant to sit on a LinkedIn profile unattended for months; defaulting to a model whose retirement
+  window opens in weeks means the most likely failure mode is a recruiter clicking the link and
+  getting an error, long after I've stopped watching.
+- Sonnet 5's $2/$10 launch pricing is now its standard price (the increase to $3/$15 was cancelled),
+  so the gap is 2× on a workload already capped at a few dollars a day — a few pence per
+  conversation. Its retirement commitment runs to mid-2027.
+
+Paying 2× to remove a seven-week clock from an unattended page is a good trade. Haiku 4.5 remains
+one environment variable away if the evals show no quality difference and I want the cost back — pin
+the **dated** ID there, because for pre-4.6 models the dateless form is an alias that resolves to a
+snapshot rather than being one. Two implementation notes for issue #124 if that switch is made:
+Haiku 4.5 does not support the `effort` parameter, and it uses the older
+`thinking: {type: "enabled", budget_tokens: N}` mode rather than adaptive thinking.
+
+### What a conversation actually costs
+
+A 10-turn conversation with a 20k-token system prompt, ~2k of accumulated history and ~400-token
+answers, at Sonnet 5 prices (base input $2, output $10, 1h cache write $4, cache read $0.20 per MTok):
+
+| Scenario | Cost |
+|---|---|
+| System prompt cached and hit on every turn | ≈ **$0.17** |
+| Every turn misses the cache (re-write each time) | ≈ **$0.33** |
+| No caching at all | ≈ **$0.48** |
+
+**Use the 1-hour cache TTL, not the default 5-minute one.** A visitor reading a paragraph of answer
+and typing a follow-up routinely takes more than five minutes, so the default TTL would miss on a
+large share of turns — exactly the pattern in the middle row. At 2× base input the 1-hour write pays
+for itself after two reads, which a real conversation clears easily.
+
+So `AVATAR_DAILY_BUDGET_USD` defaults to **$5.00**: roughly 10–30 genuine conversations a day,
+depending on cache behaviour. Note what this number is and isn't — it is a circuit breaker against a
+scripted abuser, not a capacity plan. If the page ever sees enough real traffic to trip it, that is
+good news and the answer is to raise it, not to ration. Prices above were taken from Anthropic's
+pricing page on 2026-08-27; the budget tracker should carry them in one dict with that date in a
+comment, because they move.
 
 ---
 
@@ -313,9 +346,14 @@ mitigations, both in M1:
    title, description and image instead of a bare URL, explains in two lines what the visitor is
    about to talk to — and fires a `fetch()` at the Render app the moment it loads, so the instance is
    waking while the visitor reads. The "Start chatting" button then lands on a warm app.
-2. **A keep-warm ping** — a GitHub Action pinging the app every ~14 minutes during waking hours. One
-   free instance running most of the day fits inside Render's free monthly instance-hours; a 24/7
-   ping does not, so the schedule is deliberately partial.
+2. **A keep-warm ping** — a GitHub Action pinging the app every ~14 minutes during waking hours.
+   The arithmetic, from Render's free-tier docs: **750 instance-hours per month, shared across the
+   whole workspace**, and a spun-down service consumes none of them. A 31-day month is 744 hours, so
+   pinging a single service 24/7 *would* fit — with about six hours of headroom, and only if this is
+   the only free service in the workspace. The waking-hours window is therefore a deliberate choice
+   to keep that headroom and leave room for another free service later, not an arithmetic necessity.
+   If this is ever the only thing running and I want it always warm, widening the schedule is a
+   legitimate call — just re-check the current allowance first.
 
 **LinkedIn placement:** Featured section (link + custom image), plus the "Website" field in contact
 info, plus a launch post. LinkedIn does not permit embedded iframes on profiles — a link is the only
@@ -328,8 +366,8 @@ option, which is precisely why the landing page's link preview matters.
 | Variable | Default | Purpose |
 |---|---|---|
 | `ANTHROPIC_API_KEY` | — | Required |
-| `AVATAR_MODEL` | `claude-haiku-4-5` | Model override |
-| `AVATAR_DAILY_BUDGET_USD` | `1.00` | Kill-switch threshold |
+| `AVATAR_MODEL` | `claude-sonnet-5` | Model override (`claude-haiku-4-5-20251001` to halve cost) |
+| `AVATAR_DAILY_BUDGET_USD` | `5.00` | Kill-switch threshold |
 | `AVATAR_MAX_CONTEXT_TOKENS` | `40000` | System-prompt budget |
 | `AVATAR_MAX_INPUT_CHARS` | `1500` | Per-message input cap |
 | `AVATAR_SESSION_RATE_LIMIT` | `20/hour` | Per-session limit |
