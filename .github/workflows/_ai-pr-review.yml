@@ -57,6 +57,9 @@ on:
       gh_token:
         description: "Token used for gh CLI calls (PR/issue read and write)"
         required: true
+      cicaid_pro_token:
+        description: "Read-only PAT for the private leonarduk/cicaid-pro repo, used to install cicaid-devtools-pro (the review_module engine). Optional: omit for script-based providers like Claude that don't use a cicaid-devtools review_module."
+        required: false
 
 # github.workflow resolves to the *calling* workflow's name (DeepSeek/GPT PR
 # Review), so this groups per-provider without cross-cancelling other
@@ -94,6 +97,29 @@ jobs:
           curl -fsSL "$CICAID_WHEEL_URL" -o "$wheel_file"
           echo "$CICAID_WHEEL_SHA256  $wheel_file" | sha256sum -c -
           python -m pip install "$wheel_file"
+
+      - name: Install cicaid-devtools-pro
+        env:
+          # cicaid-devtools-pro (the LLM review/triage engine backing the
+          # review_module providers below) lives in the private
+          # leonarduk/cicaid-pro repo and, since v0.12.0, no longer publishes
+          # wheel release assets - it has to be installed from source against
+          # a tagged commit instead. Bump CICAID_PRO_REF when a new pro
+          # release is cut.
+          CICAID_PRO_REF: v0.13.1
+          CICAID_PRO_TOKEN: ${{ secrets.cicaid_pro_token }}
+        run: |
+          set -euo pipefail
+          if [ -z "${CICAID_PRO_TOKEN:-}" ]; then
+            echo "cicaid_pro_token not supplied - skipping cicaid-devtools-pro install (expected for script-based providers, e.g. Claude, that don't use a review_module)."
+            exit 0
+          fi
+          # Route github.com over HTTPS through the token via credential
+          # rewriting rather than embedding it in the pip requirement string,
+          # so it never appears in pip's own "Cloning ..." log line.
+          git config --global "url.https://x-access-token:${CICAID_PRO_TOKEN}@github.com/.insteadOf" "https://github.com/"
+          trap 'git config --global --unset "url.https://x-access-token:${CICAID_PRO_TOKEN}@github.com/.insteadOf"' EXIT
+          python -m pip install "cicaid-devtools-pro @ git+https://github.com/leonarduk/cicaid-pro.git@${CICAID_PRO_REF}"
 
       - name: Get linked issue body
         id: issue
