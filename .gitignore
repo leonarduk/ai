@@ -50,3 +50,13 @@ Thumbs.db
 Desktop.ini
 
 PRIVATE
+
+# LinkedIn Avatar — personal export, never a public repo artifact
+linkedin.pdf
+**/linkedin.pdf
+
+# LinkedIn Avatar's build/ is a source directory (build_profile.py,
+# build_github_snapshot.py), not a Python build-artifacts dir — un-ignore it
+# from the generic "build/" rule above
+!projects/08-linkedin-avatar/build/
+!projects/08-linkedin-avatar/build/**

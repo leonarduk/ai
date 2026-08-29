@@ -26,8 +26,8 @@ Because it is a public endpoint with an API key behind it, the guardrails are pa
 not an afterthought: input length cap, per-session and per-IP rate limits, and a daily spend
 kill-switch.
 
-**Tech stack:** Python, Gradio, Anthropic Messages API (prompt caching + tool use), GitHub REST API,
-Pushover, Render, GitHub Pages.
+**Tech stack:** Python, Gradio, DeepSeek API (OpenAI-compatible, automatic prompt caching + tool use),
+GitHub REST API, Pushover, Render, GitHub Pages.
 
 ## Prior art
 
