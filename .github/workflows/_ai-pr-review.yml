@@ -101,11 +101,11 @@ jobs:
       - name: Install cicaid-devtools-pro
         env:
           # cicaid-devtools-pro (the LLM review/triage engine backing the
-          # review_module providers below) lives in the private
-          # leonarduk/cicaid-pro repo and, since v0.12.0, no longer publishes
-          # wheel release assets - it has to be installed from source against
-          # a tagged commit instead. Bump CICAID_PRO_REF when a new pro
-          # release is cut.
+          # review_module providers below) lives in a private companion repo,
+          # leonarduk/cicaid-pro, that stopped publishing wheel release assets
+          # partway through its release history - it has to be installed from
+          # source against a tagged commit instead. Bump CICAID_PRO_REF when a
+          # new pro release is cut.
           CICAID_PRO_REF: v0.13.1
           CICAID_PRO_TOKEN: ${{ secrets.cicaid_pro_token }}
         run: |
@@ -114,11 +114,15 @@ jobs:
             echo "cicaid_pro_token not supplied - skipping cicaid-devtools-pro install (expected for script-based providers, e.g. Claude, that don't use a review_module)."
             exit 0
           fi
-          # Route github.com over HTTPS through the token via credential
-          # rewriting rather than embedding it in the pip requirement string,
-          # so it never appears in pip's own "Cloning ..." log line.
-          git config --global "url.https://x-access-token:${CICAID_PRO_TOKEN}@github.com/.insteadOf" "https://github.com/"
-          trap 'git config --global --unset "url.https://x-access-token:${CICAID_PRO_TOKEN}@github.com/.insteadOf"' EXIT
+          # Route github.com over HTTPS through the token via a git config
+          # override scoped to this one command (GIT_CONFIG_COUNT/KEY/VALUE),
+          # rather than `git config --global`, so no cleanup/trap is needed
+          # and nothing touches the runner's persistent git config. It also
+          # keeps the token out of pip's own "Cloning ..." log line, since
+          # the requirement string itself carries the plain github.com URL.
+          GIT_CONFIG_COUNT=1 \
+          GIT_CONFIG_KEY_0="url.https://x-access-token:${CICAID_PRO_TOKEN}@github.com/.insteadOf" \
+          GIT_CONFIG_VALUE_0="https://github.com/" \
           python -m pip install "cicaid-devtools-pro @ git+https://github.com/leonarduk/cicaid-pro.git@${CICAID_PRO_REF}"
 
       - name: Get linked issue body
