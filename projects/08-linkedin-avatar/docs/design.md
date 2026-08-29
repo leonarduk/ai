@@ -61,7 +61,7 @@ flowchart TB
         PROF --> CTX["context.py<br/>system prompt assembly"]
         SNAP --> CTX
         SUM["knowledge/summary.txt<br/>voice + bio"] --> CTX
-        CTX --> LLM["llm.py<br/>Anthropic Messages API<br/>tool loop + prompt cache"]
+        CTX --> LLM["llm.py<br/>DeepSeek API (OpenAI-compatible)<br/>tool loop + automatic prompt cache"]
         UI["app.py — Gradio ChatInterface"] --> GRD["guardrails.py<br/>rate limit / length / spend cap"]
         GRD --> LLM
         LLM --> TOOLS["tools.py"]
@@ -82,7 +82,7 @@ flowchart TB
 |---|---|---|
 | `app.py` | Gradio `ChatInterface`, branding, example prompts | Thin — no business logic |
 | `avatar/context.py` | Assemble the system prompt from the three knowledge files, under a token budget | Pure function of files on disk → deterministic, testable, cacheable |
-| `avatar/llm.py` | Anthropic client, tool-use loop, prompt caching, usage accounting | Single provider; model from env |
+| `avatar/llm.py` | DeepSeek client (`openai` SDK, `base_url` pointed at DeepSeek), tool-use loop, usage accounting | Single provider; model from env. Claude Sonnet is a documented fallback (see §7) |
 | `avatar/tools.py` | `record_contact`, `record_unknown_question`, `lookup_project` | Tool schemas with `strict: true` |
 | `avatar/guardrails.py` | Per-session and per-IP rate limits, input length cap, daily spend kill-switch | In-process; no DB (see §6) |
 | `avatar/styles.py` | CSS/JS/theme, example questions | Adapted from the prior art |
@@ -191,20 +191,27 @@ closest to the conversation.
 
 `context.py` enforces a token budget (`AVATAR_MAX_CONTEXT_TOKENS`, default 40k). If the assembled
 prompt exceeds it, repo full-records are dropped to index lines, oldest-pushed first, until it fits;
-if it still doesn't fit, that's a build error, not a silent truncation. Token counts come from the
-Anthropic count-tokens endpoint, not a heuristic.
+if it still doesn't fit, that's a build error, not a silent truncation. DeepSeek has no count-tokens
+endpoint, so token counts come from the offline `deepseek_tokenizer` package (bundled at build time),
+not a runtime API call and not the character-count heuristic DeepSeek's own docs offer as a fallback.
 
-The whole system prompt gets a `cache_control` breakpoint, with the **1-hour TTL** rather than the
-default 5-minute one — a visitor reading an answer and typing a follow-up routinely takes longer than
-five minutes, so the short TTL would miss on a large share of turns (§7 has the arithmetic). With a
-~15–25k prompt and a 10-turn conversation, caching is the difference between "this is a fun demo" and
-"I've turned it off because of the bill".
+DeepSeek's context caching is **automatic and best-effort** — there is no `cache_control` breakpoint
+or TTL to set. The API builds cache units from stable prefixes across requests and reports
+`prompt_cache_hit_tokens` / `prompt_cache_miss_tokens` on each response; the only lever `context.py`
+has is what this section already does — put everything stable (role, `summary.txt`, `profile.md`,
+GitHub index) before anything that varies, so the prefix has the best chance of matching turn to
+turn. Unlike Anthropic's explicit 1-hour TTL, DeepSeek's docs only say an unused cache "usually"
+clears within hours to days — `llm.py` should log the hit/miss token counts per response so real
+cache behaviour is visible rather than assumed (§7 has the arithmetic for both cases).
 
 ---
 
 ## 5. Tools
 
-Three, all with `strict: true` schemas.
+Three, all with `strict: true` schemas. DeepSeek's strict mode is a beta feature: it requires
+`base_url="https://api.deepseek.com/beta"` and every schema to mark all properties `required` with
+`"additionalProperties": false` — `tools.py` should validate its own schemas against that shape in a
+test, since a schema that's valid for a non-strict call can silently stop being enforced otherwise.
 
 | Tool | Purpose | Side effect |
 |---|---|---|
@@ -257,52 +264,65 @@ about beyond one sentence.
 
 | | |
 |---|---|
-| Provider | Anthropic Messages API (`anthropic` Python SDK) |
-| Default model | `claude-sonnet-5` — $2 / $10 per MTok in/out |
-| Cost-down option | `AVATAR_MODEL=claude-haiku-4-5-20251001` — $1 / $5, half the price (see the lifecycle note) |
-| Caching | `cache_control` on the system prompt, 1-hour TTL |
+| Provider | DeepSeek API — OpenAI-compatible; `openai` Python SDK with `base_url="https://api.deepseek.com"` |
+| Default model | `deepseek-v4-flash` — $0.007–0.014 / $0.22–0.44 / $0.66–1.32 per MTok (cache-hit in / cache-miss in / out, off-peak–peak) |
+| Fallback | `AVATAR_PROVIDER=anthropic`, `AVATAR_MODEL=claude-sonnet-5` — kept as a documented escape hatch (see below), not wired into `llm.py`'s default path |
+| Caching | Automatic, best-effort, no TTL to configure (§4) |
 
-**Why Sonnet 5 and not Haiku.** Haiku is the obvious pick for a task that is "answer questions from a
-20k-token brief in a consistent voice", and the first draft of this design defaulted to it. Two facts
-from the model docs changed that:
+**Why DeepSeek and not Anthropic by default.** The user's call: DeepSeek v4-flash is roughly two
+orders of magnitude cheaper per token than Sonnet 5 (fractions of a cent vs. dollars per MTok), and
+this page's entire cost profile is "tiny, unattended, publicly linked" — the workload this pricing
+gap matters most for. Two things this trade gives up, both accepted:
 
-- Haiku 4.5's published retirement commitment is **not sooner than 15 October 2026**. This page is
-  meant to sit on a LinkedIn profile unattended for months; defaulting to a model whose retirement
-  window opens in weeks means the most likely failure mode is a recruiter clicking the link and
-  getting an error, long after I've stopped watching.
-- Sonnet 5's $2/$10 launch pricing is now its standard price (the increase to $3/$15 was cancelled),
-  so the gap is 2× on a workload already capped at a few dollars a day — a few pence per
-  conversation. Its retirement commitment runs to mid-2027.
+- **No published retirement commitment** for `deepseek-v4-flash`/`deepseek-v4-pro` (unlike Sonnet
+  5's mid-2027 commitment). DeepSeek has precedent for retiring model *names* on a signalled
+  timeline — the legacy `deepseek-chat`/`deepseek-reasoner` aliases got three months' notice before
+  being discontinued (2026-07-24) — so `llm.py` should pin the specific `v4-*` id, not assume it's
+  permanent, and `AVATAR_MODEL` should be trivial to repoint.
+- **Caching is automatic and unverified in practice**, not an explicit contract like Anthropic's
+  `cache_control` TTL (§4). The cost table below is a best-effort estimate, not a guarantee — the
+  real number depends on DeepSeek's cache behaviour under this app's actual traffic pattern, which
+  `llm.py` should log so it can be checked against the assumptions here.
 
-Paying 2× to remove a seven-week clock from an unattended page is a good trade. Haiku 4.5 remains
-one environment variable away if the evals show no quality difference and I want the cost back — pin
-the **dated** ID there, because for pre-4.6 models the dateless form is an alias that resolves to a
-snapshot rather than being one. Two implementation notes for issue #124 if that switch is made:
-Haiku 4.5 does not support the `effort` parameter, and it uses the older
-`thinking: {type: "enabled", budget_tokens: N}` mode rather than adaptive thinking.
+**Why keep Claude as a fallback at all.** If DeepSeek has an outage, a breaking API change, or the
+evals in §8 show a quality regression that matters for a page representing me to recruiters, swapping
+`AVATAR_PROVIDER` back to Anthropic should not require re-deriving the tool-use loop from scratch.
+This means `llm.py`'s internal message/tool representation should be a small provider-agnostic shape
+that both a DeepSeek and an Anthropic backend can be written against — issue #124 implements the
+DeepSeek path only; a same-shaped Anthropic backend is out of scope for M1 and not currently ticketed.
+
+**deepseek-v4-flash vs. deepseek-v4-pro.** Flash is the default for the same reason Haiku was the
+first draft's pick for Anthropic: this is "answer questions from a 20k-token brief in a consistent
+voice", not a task that needs frontier reasoning. Pro is roughly 3× flash's price and is the quality
+lever if evals show flash falling short, one environment variable away.
 
 ### What a conversation actually costs
 
-A 10-turn conversation with a 20k-token system prompt, ~2k of accumulated history and ~400-token
-answers, at Sonnet 5 prices (base input $2, output $10, 1h cache write $4, cache read $0.20 per MTok):
+A 10-turn conversation with a 20k-token system prompt, ~1k of accumulated history per turn and
+~400-token answers, at `deepseek-v4-flash` **peak** prices (the conservative bound — off-peak is
+cheaper): cache-hit input $0.014, cache-miss input $0.44, output $1.32, all per MTok.
 
 | Scenario | Cost |
 |---|---|
-| System prompt cached and hit on every turn | ≈ **$0.17** |
-| Every turn misses the cache (re-write each time) | ≈ **$0.33** |
-| No caching at all | ≈ **$0.48** |
+| System prompt cache-hit from turn 2 onward (expected case) | ≈ **$0.02** |
+| No caching at all (every turn re-sends the full prompt as a miss) | ≈ **$0.10** |
 
-**Use the 1-hour cache TTL, not the default 5-minute one.** A visitor reading a paragraph of answer
-and typing a follow-up routinely takes more than five minutes, so the default TTL would miss on a
-large share of turns — exactly the pattern in the middle row. At 2× base input the 1-hour write pays
-for itself after two reads, which a real conversation clears easily.
+Both numbers are estimates from the pricing arithmetic, not a measured run — DeepSeek gives no
+explicit control over the cache like Anthropic's TTL, so §4's ordering discipline is the only lever
+available, and `llm.py` logging `prompt_cache_hit_tokens`/`prompt_cache_miss_tokens` is how this gets
+checked against reality once the app is live.
 
-So `AVATAR_DAILY_BUDGET_USD` defaults to **$5.00**: roughly 10–30 genuine conversations a day,
-depending on cache behaviour. Note what this number is and isn't — it is a circuit breaker against a
-scripted abuser, not a capacity plan. If the page ever sees enough real traffic to trip it, that is
-good news and the answer is to raise it, not to ration. Prices above were taken from Anthropic's
-pricing page on 2026-08-27; the budget tracker should carry them in one dict with that date in a
-comment, because they move.
+Even the pessimistic case is roughly **20× cheaper** than the equivalent no-caching Sonnet 5
+conversation this design originally costed at ≈$0.48, which is the entire reason for this switch.
+
+So `AVATAR_DAILY_BUDGET_USD` defaults to **$2.00**: at worst-case pricing with no caching, that's
+still ~20 genuine conversations a day, and several hundred if caching behaves as documented. Note
+what this number is and isn't — it is a circuit breaker against a scripted abuser, not a capacity
+plan; the low headline cost of a single conversation is exactly why a scripted abuser is cheap to run
+and the cap still matters. If the page ever sees enough real traffic to trip it, that is good news and
+the answer is to raise it, not to ration. Prices above were taken from DeepSeek's pricing page on
+2026-08-29; the budget tracker should carry them in one dict with that date in a comment, because they
+move — and because DeepSeek publishes separate peak/off-peak rates, unlike Anthropic's flat pricing.
 
 ---
 
@@ -334,8 +354,9 @@ guess.
 
 **App:** Render free web service, root directory `projects/08-linkedin-avatar`, build
 `pip install -r requirements.txt`, start `python app.py`, with `GRADIO_SERVER_NAME=0.0.0.0` and
-`GRADIO_SERVER_PORT=10000`. Secrets (`ANTHROPIC_API_KEY`, `PUSHOVER_USER`, `PUSHOVER_TOKEN`) in
-Render's dashboard, never in the repo.
+`GRADIO_SERVER_PORT=10000`. Secrets (`DEEPSEEK_API_KEY`, `PUSHOVER_USER`, `PUSHOVER_TOKEN`, plus
+`ANTHROPIC_API_KEY` only if the fallback provider in §7 is ever switched on) in Render's dashboard,
+never in the repo.
 
 **The cold-start problem.** Render's free tier sleeps after 15 minutes idle and takes 30–60s to wake.
 A recruiter who clicks a LinkedIn link and gets a blank loading page for a minute is gone. Two
@@ -365,9 +386,10 @@ option, which is precisely why the landing page's link preview matters.
 
 | Variable | Default | Purpose |
 |---|---|---|
-| `ANTHROPIC_API_KEY` | — | Required |
-| `AVATAR_MODEL` | `claude-sonnet-5` | Model override (`claude-haiku-4-5-20251001` to halve cost) |
-| `AVATAR_DAILY_BUDGET_USD` | `5.00` | Kill-switch threshold |
+| `DEEPSEEK_API_KEY` | — | Required |
+| `AVATAR_PROVIDER` | `deepseek` | Set to `anthropic` to use the fallback in §7 (requires `ANTHROPIC_API_KEY`) |
+| `AVATAR_MODEL` | `deepseek-v4-flash` | Model override (`deepseek-v4-pro` for higher quality, `claude-sonnet-5` if `AVATAR_PROVIDER=anthropic`) |
+| `AVATAR_DAILY_BUDGET_USD` | `2.00` | Kill-switch threshold |
 | `AVATAR_MAX_CONTEXT_TOKENS` | `40000` | System-prompt budget |
 | `AVATAR_MAX_INPUT_CHARS` | `1500` | Per-message input cap |
 | `AVATAR_SESSION_RATE_LIMIT` | `20/hour` | Per-session limit |
@@ -392,7 +414,7 @@ sequenced so each one lands something testable and nothing is blocked for long.
 | [121](https://github.com/leonarduk/ai-systems-lab/issues/121) | Nightly knowledge-refresh Action | sonnet | 120 |
 | [122](https://github.com/leonarduk/ai-systems-lab/issues/122) | Prompt assembly + token budget | sonnet | 118, 119, 120 |
 | [123](https://github.com/leonarduk/ai-systems-lab/issues/123) | The three tools | sonnet | 117 |
-| [124](https://github.com/leonarduk/ai-systems-lab/issues/124) | Anthropic client + tool loop | sonnet | 122, 123 |
+| [124](https://github.com/leonarduk/ai-systems-lab/issues/124) | DeepSeek client + tool loop | sonnet | 122, 123 |
 | [125](https://github.com/leonarduk/ai-systems-lab/issues/125) | Gradio UI + branding | sonnet | 124, 126 |
 | [126](https://github.com/leonarduk/ai-systems-lab/issues/126) | Guardrails: limits + spend cap | sonnet | 117 |
 | [127](https://github.com/leonarduk/ai-systems-lab/issues/127) | System prompt rules block | sonnet | 122 |
