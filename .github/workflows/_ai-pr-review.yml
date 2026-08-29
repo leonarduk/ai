@@ -86,8 +86,8 @@ jobs:
 
       - name: Install cicaid-devtools
         env:
-          CICAID_WHEEL_URL: https://github.com/leonarduk/cicaid/releases/download/v0.7.8/cicaid_devtools-0.7.8-py3-none-any.whl
-          CICAID_WHEEL_SHA256: 40b407d76dd94d78f1d961bac73a3f90d57241466a6173392a0a0387ee8bdb27
+          CICAID_WHEEL_URL: https://github.com/leonarduk/cicaid/releases/download/v0.3.0/cicaid_devtools-0.3.0-py3-none-any.whl
+          CICAID_WHEEL_SHA256: 5b113d70851a58a8d6a9bbd6c1160b9569aadac486262140afedc75ecf7f179c
         run: |
           set -euo pipefail
           wheel_file="/tmp/$(basename "$CICAID_WHEEL_URL")"
