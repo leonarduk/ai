@@ -21,3 +21,4 @@ jobs:
       openai_api_key: ${{ secrets.OPENAI_API_KEY }}
       deepseek_api_key: ${{ secrets.DEEPSEEK_API_KEY }}
       gh_token: ${{ secrets.GITHUB_TOKEN }}
+      cicaid_pro_token: ${{ secrets.CICAID_PRO_TOKEN }}
