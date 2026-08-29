@@ -109,8 +109,19 @@ jobs:
       # override. Bump the `ref` when a new pro release is cut. Skipped
       # entirely for script-based providers (e.g. Claude) that don't pass
       # cicaid_pro_token, since they don't use a review_module.
+      - name: Check for cicaid-pro token
+        # `secrets` isn't a valid context in a step's `if:` either (only
+        # env/github/inputs/job/matrix/needs/runner/steps/strategy/vars are;
+        # claude-pr-review.yml's check-secret job hits the same restriction
+        # at job level), so the presence check has to happen in a run: step
+        # and be surfaced as an output for the next step's `if:` to read.
+        id: cicaid_pro_check
+        env:
+          CICAID_PRO_TOKEN: ${{ secrets.cicaid_pro_token }}
+        run: echo "has_token=$([ -n "$CICAID_PRO_TOKEN" ] && echo true || echo false)" >> "$GITHUB_OUTPUT"
+
       - name: Checkout cicaid-devtools-pro
-        if: ${{ secrets.cicaid_pro_token != '' }}
+        if: ${{ steps.cicaid_pro_check.outputs.has_token == 'true' }}
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7
         with:
           repository: leonarduk/cicaid-pro
