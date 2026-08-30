@@ -1,0 +1,93 @@
+"""Tests for app.py's chat orchestration logic. No live Gradio server, no
+live DeepSeek calls — guardrails and llm are monkeypatched."""
+
+import sys
+from pathlib import Path
+from types import SimpleNamespace
+
+sys.path.insert(0, str(Path(__file__).parent.parent))
+
+import app  # noqa: E402
+import gradio as gr  # noqa: E402
+
+
+def make_request(ip="1.2.3.4", session_hash="session-abc"):
+    return SimpleNamespace(client=SimpleNamespace(host=ip), session_hash=session_hash)
+
+
+class TestClientIpAndSessionId:
+    def test_client_ip_from_request(self):
+        assert app._client_ip(make_request(ip="9.9.9.9")) == "9.9.9.9"
+
+    def test_client_ip_missing_request_is_unknown(self):
+        assert app._client_ip(None) == "unknown"
+
+    def test_client_ip_missing_client_is_unknown(self):
+        assert app._client_ip(SimpleNamespace(client=None)) == "unknown"
+
+    def test_session_id_from_request(self):
+        assert app._session_id(make_request(session_hash="abc123")) == "abc123"
+
+    def test_session_id_missing_request_is_unknown(self):
+        assert app._session_id(None) == "unknown"
+
+    def test_session_id_empty_hash_is_unknown(self):
+        assert app._session_id(SimpleNamespace(session_hash="")) == "unknown"
+
+
+class TestToConversation:
+    def test_appends_message_to_history(self):
+        history = [
+            {"role": "user", "content": "hi"},
+            {"role": "assistant", "content": "hello"},
+        ]
+        conversation = app._to_conversation(history, "what's next?")
+        assert conversation == [
+            {"role": "user", "content": "hi"},
+            {"role": "assistant", "content": "hello"},
+            {"role": "user", "content": "what's next?"},
+        ]
+
+    def test_empty_history(self):
+        assert app._to_conversation([], "hi") == [{"role": "user", "content": "hi"}]
+
+
+class TestChat:
+    def test_refusal_short_circuits_before_calling_llm(self, monkeypatch):
+        monkeypatch.setattr(
+            app.guardrails, "check_request", lambda *a: (False, "rate limited")
+        )
+        called = {"llm": False}
+        monkeypatch.setattr(
+            app.llm,
+            "send_message",
+            lambda *a, **k: called.update(llm=True) or ("x", {}),
+        )
+
+        reply = app.chat("hi", [], make_request())
+
+        assert reply == "rate limited"
+        assert called["llm"] is False
+
+    def test_allowed_request_calls_llm_and_records_usage(self, monkeypatch):
+        monkeypatch.setattr(app.guardrails, "check_request", lambda *a: (True, None))
+        monkeypatch.setattr(
+            app.llm,
+            "send_message",
+            lambda conversation, system_prompt: ("a reply", {"output_tokens": 10}),
+        )
+        recorded = {}
+        monkeypatch.setattr(
+            app.guardrails, "record_usage", lambda usage: recorded.update(usage)
+        )
+
+        reply = app.chat("hi", [], make_request())
+
+        assert reply == "a reply"
+        assert recorded == {"output_tokens": 10}
+
+
+class TestBuildDemo:
+    def test_builds_without_error(self):
+        demo = app.build_demo()
+        assert isinstance(demo, gr.Blocks)
