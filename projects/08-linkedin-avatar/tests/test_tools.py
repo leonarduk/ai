@@ -1,6 +1,7 @@
 """Tests for avatar/tools.py. No test performs a real network call."""
 
 import json
+import logging
 import sys
 from pathlib import Path
 
@@ -137,6 +138,35 @@ class TestTelegramNotify:
         result = tools._telegram_notify("title", "message")
 
         assert result["status"] == "failed"
+
+    def test_token_never_appears_in_logs_on_http_failure(self, monkeypatch, caplog):
+        # Telegram's URL embeds the token (.../bot<TOKEN>/sendMessage), unlike
+        # Pushover's fixed URL — a naive logger.exception would leak it into
+        # Render's logs, which is exactly what happened before this was fixed.
+        monkeypatch.setenv("TELEGRAM_BOT_TOKEN", "super-secret-token")
+        monkeypatch.setenv("TELEGRAM_CHAT_ID", "cid")
+        monkeypatch.setattr(tools.requests, "post", lambda *a, **k: FakeResponse(400))
+
+        with caplog.at_level(logging.ERROR):
+            result = tools._telegram_notify("title", "message")
+
+        assert result["status"] == "failed"
+        assert "super-secret-token" not in caplog.text
+
+    def test_token_never_appears_in_logs_on_connection_error(self, monkeypatch, caplog):
+        monkeypatch.setenv("TELEGRAM_BOT_TOKEN", "super-secret-token")
+        monkeypatch.setenv("TELEGRAM_CHAT_ID", "cid")
+        monkeypatch.setattr(
+            tools.requests,
+            "post",
+            lambda *a, **k: (_ for _ in ()).throw(tools.requests.ConnectionError("no network")),
+        )
+
+        with caplog.at_level(logging.ERROR):
+            result = tools._telegram_notify("title", "message")
+
+        assert result["status"] == "failed"
+        assert "super-secret-token" not in caplog.text
 
 
 class TestNotifyFanOut:

@@ -148,8 +148,12 @@ def _telegram_notify(title, message):
             timeout=10,
         )
         response.raise_for_status()
-    except requests.RequestException:
-        logger.exception("Telegram notification failed: %s", title)
+    except requests.RequestException as exc:
+        # Telegram's URL embeds the bot token (unlike Pushover's, which keeps
+        # it in the POST body) — logger.exception would print that URL, so
+        # log only the status code, never the exception object itself.
+        status = getattr(exc.response, "status_code", "no response")
+        logger.error("Telegram notification failed (status=%s): %s", status, title)
         return {"status": "failed", "detail": "notification could not be sent"}
 
     return {"status": "sent"}
