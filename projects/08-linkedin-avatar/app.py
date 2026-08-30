@@ -6,6 +6,7 @@ docs/design.md §4), and each turn is just guardrails → the DeepSeek
 tool-use loop → guardrails again for spend accounting.
 """
 
+import logging
 import os
 
 import gradio as gr
@@ -14,6 +15,7 @@ from dotenv import load_dotenv
 from avatar import context, guardrails, llm, styles
 
 load_dotenv()
+logging.basicConfig(level=logging.INFO)
 
 SYSTEM_PROMPT = context.build_system_prompt()
 

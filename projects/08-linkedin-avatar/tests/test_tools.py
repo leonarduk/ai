@@ -26,6 +26,12 @@ def _clear_pushover_env(monkeypatch):
     monkeypatch.delenv("PUSHOVER_TOKEN", raising=False)
 
 
+@pytest.fixture(autouse=True)
+def _clear_telegram_env(monkeypatch):
+    monkeypatch.delenv("TELEGRAM_BOT_TOKEN", raising=False)
+    monkeypatch.delenv("TELEGRAM_CHAT_ID", raising=False)
+
+
 class TestPushoverNotify:
     def test_logs_when_credentials_missing(self):
         result = tools._pushover_notify("title", "message")
@@ -76,6 +82,89 @@ class TestPushoverNotify:
         monkeypatch.setattr(tools.requests, "post", fake_post)
 
         result = tools._pushover_notify("title", "message")
+
+        assert result["status"] == "failed"
+
+
+class TestTelegramNotify:
+    def test_logs_when_credentials_missing(self):
+        result = tools._telegram_notify("title", "message")
+        assert result["status"] == "logged"
+
+    def test_posts_when_credentials_present(self, monkeypatch):
+        monkeypatch.setenv("TELEGRAM_BOT_TOKEN", "tok")
+        monkeypatch.setenv("TELEGRAM_CHAT_ID", "cid")
+
+        captured = {}
+
+        def fake_post(url, data, timeout):
+            captured["url"] = url
+            captured["data"] = data
+            return FakeResponse(200)
+
+        monkeypatch.setattr(tools.requests, "post", fake_post)
+
+        result = tools._telegram_notify("title", "message")
+
+        assert result["status"] == "sent"
+        assert captured["url"] == tools.TELEGRAM_API_URL.format(token="tok")
+        assert captured["data"]["chat_id"] == "cid"
+        assert "title" in captured["data"]["text"]
+        assert "message" in captured["data"]["text"]
+
+    def test_http_failure_does_not_raise(self, monkeypatch):
+        monkeypatch.setenv("TELEGRAM_BOT_TOKEN", "tok")
+        monkeypatch.setenv("TELEGRAM_CHAT_ID", "cid")
+
+        def fake_post(url, data, timeout):
+            return FakeResponse(500)
+
+        monkeypatch.setattr(tools.requests, "post", fake_post)
+
+        result = tools._telegram_notify("title", "message")
+
+        assert result["status"] == "failed"
+
+    def test_connection_error_does_not_raise(self, monkeypatch):
+        monkeypatch.setenv("TELEGRAM_BOT_TOKEN", "tok")
+        monkeypatch.setenv("TELEGRAM_CHAT_ID", "cid")
+
+        def fake_post(url, data, timeout):
+            raise tools.requests.ConnectionError("no network")
+
+        monkeypatch.setattr(tools.requests, "post", fake_post)
+
+        result = tools._telegram_notify("title", "message")
+
+        assert result["status"] == "failed"
+
+
+class TestNotifyFanOut:
+    def test_logged_when_nothing_configured(self):
+        result = tools._notify("title", "message")
+        assert result["status"] == "logged"
+        assert result["channels"]["pushover"]["status"] == "logged"
+        assert result["channels"]["telegram"]["status"] == "logged"
+
+    def test_sent_when_any_channel_sends(self, monkeypatch):
+        monkeypatch.setenv("TELEGRAM_BOT_TOKEN", "tok")
+        monkeypatch.setenv("TELEGRAM_CHAT_ID", "cid")
+        monkeypatch.setattr(tools.requests, "post", lambda *a, **k: FakeResponse(200))
+
+        result = tools._notify("title", "message")
+
+        assert result["status"] == "sent"
+
+    def test_failed_when_configured_channel_errors_and_none_send(self, monkeypatch):
+        monkeypatch.setenv("PUSHOVER_USER", "u")
+        monkeypatch.setenv("PUSHOVER_TOKEN", "t")
+        monkeypatch.setattr(
+            tools.requests,
+            "post",
+            lambda *a, **k: (_ for _ in ()).throw(tools.requests.ConnectionError()),
+        )
+
+        result = tools._notify("title", "message")
 
         assert result["status"] == "failed"
 

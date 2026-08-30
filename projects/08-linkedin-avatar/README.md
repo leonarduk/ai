@@ -3,12 +3,11 @@
 An AI twin that talks to visitors about my career and my GitHub projects — one link, dropped into
 the Featured section of my LinkedIn profile.
 
-**Status:** most of the app is built; not yet deployed. See [`docs/design.md`](./docs/design.md)
-and the issues in
+**Status:** deployed. See [`docs/design.md`](./docs/design.md) and the issues in
 [milestone 4 — LinkedIn Avatar M1](https://github.com/leonarduk/ai-systems-lab/milestone/4).
 
-**Live URLs** *(filled in once issue #130's deploy is done)*:
-- App: *TODO — Render URL*
+**Live URLs**:
+- App: [ai-systems-lab-s8gy.onrender.com](https://ai-systems-lab-s8gy.onrender.com)
 - Landing page: *TODO — GitHub Pages URL*
 
 See [`docs/deployment.md`](./docs/deployment.md) for exactly how to deploy, rotate a key, check
@@ -34,7 +33,7 @@ not an afterthought: input length cap, per-session and per-IP rate limits, and a
 kill-switch.
 
 **Tech stack:** Python, Gradio, DeepSeek API (OpenAI-compatible, automatic prompt caching + tool use),
-GitHub REST API, Pushover, Render, GitHub Pages.
+GitHub REST API, Pushover/Telegram, Render, GitHub Pages.
 
 ## Knowledge file formats
 
@@ -62,10 +61,10 @@ python evals/run_evals.py --model deepseek-v4-pro   # compare a different model
 ```
 
 Every assertion targets *behaviour* (a tool call, a required or forbidden substring/pattern in the
-reply), never exact wording, so a harmless rewording of an answer doesn't fail the suite. Pushover
-is stubbed for the whole run — no case can ever send a real notification, regardless of what's in
-the environment. Deliberately **not** wired into CI: it costs real money and needs
-`DEEPSEEK_API_KEY`, so it's run by hand, not on every push.
+reply), never exact wording, so a harmless rewording of an answer doesn't fail the suite. Every
+notification channel (Pushover, Telegram) is stubbed for the whole run — no case can ever send a
+real notification, regardless of what's in the environment. Deliberately **not** wired into CI: it
+costs real money and needs `DEEPSEEK_API_KEY`, so it's run by hand, not on every push.
 
 ## Prior art
 
