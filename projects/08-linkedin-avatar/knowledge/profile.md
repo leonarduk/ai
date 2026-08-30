@@ -35,9 +35,9 @@ I designed and built a natural-language query system over
 financial databases end to end: an LLM-powered internal chatbot with
 enterprise authentication, backed by a three-tool MCP server I built
 for discovery, context retrieval and auditable SQL generation against
-a Sybase IQ warehouse, on Java/Spring Boot services — the kind of work
-where solid backend engineering and modern AI capabilities reinforce
-each other, rather than AI being bolted on.My
+a Sybase IQ warehouse — the kind of work where solid backend
+engineering and modern AI capabilities reinforce each other, rather
+than AI being bolted on.My
 background spans Swiss Re, Credit Suisse, Morgan Stanley, and
 JPMorgan across risk platforms, distributed services, and cloud
 infrastructure — mostly Java, with Python where it's the right tool for
@@ -60,11 +60,13 @@ September 2022 - May 2026 (3 years 9 months)
 
 Greater London
 • Querying risk data required users to learn a complex Sybase IQ schema.
-Built an LLM‑driven chatbot on the firm’s LLMSuite platform — which
-abstracted Azure‑hosted LLMs behind an internal API — integrating enterprise
-SSO and a three‑tool MCP server for discovery, context retrieval and auditable
-SQL generation. Deployed to production and handed over for final permission
-tuning and QA.
+Built an LLM‑driven chatbot — a Python UI running in production on a
+private Cloud Foundry instance — on the firm’s LLMSuite platform, which
+abstracted Azure‑hosted LLMs behind an internal API, integrating enterprise
+SSO and a three‑tool MCP server for discovery, context retrieval and
+auditable SQL generation. Prototyped the MCP server in Python, then
+rebuilt it in Java/Spring Boot for production; handed over for final
+permission tuning and QA.
 • Under pressure from senior management to improve AI tool adoption, led
 the LLM adoption initiative across ~20 engineers — producing documentation,
 prompt libraries and Copilot guidance — while personally building MCP tools
