@@ -29,6 +29,19 @@ kill-switch.
 **Tech stack:** Python, Gradio, DeepSeek API (OpenAI-compatible, automatic prompt caching + tool use),
 GitHub REST API, Pushover, Render, GitHub Pages.
 
+## Knowledge file formats
+
+`knowledge/summary.txt` is a single plain-text paragraph, first person, under ~200 words — no
+front matter, no headings. It's the only file that sets personality and sits in every request's
+cached prefix, so it's kept short and hand-edited.
+
+`knowledge/projects.md` is plain Markdown: one `## repo-name` heading per repo (matching its GitHub
+name exactly), followed by 1–3 sentences of first-person framing. The snapshot builder
+(`build/build_github_snapshot.py`) parses it into per-repo notes and prefers a `projects.md` entry
+over the repo's own README excerpt wherever one exists — a repo with no heading here just falls back
+to its README. Headings are matched case-sensitively against the repo name; keep them in the same
+order as the root README where practical, but order isn't semantically meaningful to the parser.
+
 ## Prior art
 
 Built on the shape of [ed-donner/agents](https://github.com/ed-donner/agents) `1_foundations/twin`
