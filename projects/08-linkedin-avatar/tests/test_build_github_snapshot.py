@@ -190,6 +190,42 @@ class TestParseProjectsMd:
         assert snap.parse_projects_md(tmp_path / "does-not-exist.md") == {}
 
 
+class TestPrivacyGuardrail:
+    """The avatar's knowledge base must only ever contain public information
+    (docs/design.md §3.2, §6) — a private repo reaching github.json would be
+    a real disclosure, not a cosmetic bug. This exercises the full
+    build_snapshot() -> fetch_repos() path against the raw HTTP layer,
+    rather than mocking fetch_repos itself, so a future regression in the
+    private-repo filter would actually be caught here."""
+
+    def test_private_repo_never_reaches_the_final_snapshot(self, monkeypatch, tmp_path):
+        repos = [
+            make_repo("public-repo"),
+            make_repo("private-repo", private=True),
+        ]
+
+        def fake_get(url, headers, params=None, timeout=None):
+            if url.endswith("/repos") and params["page"] == 1:
+                return FakeResponse(200, json_data=repos)
+            if url.endswith("/repos"):
+                return FakeResponse(200, json_data=[])
+            if url.endswith("/languages"):
+                return FakeResponse(200, json_data={})
+            if url.endswith("/readme"):
+                return FakeResponse(200, text="")
+            raise AssertionError(f"unexpected URL in test: {url}")
+
+        monkeypatch.setattr(snap.requests, "get", fake_get)
+
+        records = snap.build_snapshot(
+            "leonarduk", projects_md_path=tmp_path / "projects.md"
+        )
+
+        names = [r["name"] for r in records]
+        assert names == ["public-repo"]
+        assert "private-repo" not in names
+
+
 class TestBuildSnapshot:
     def _patch_all(self, monkeypatch, repos, languages=None, readme=""):
         monkeypatch.setattr(snap, "fetch_repos", lambda user, token=None: repos)
