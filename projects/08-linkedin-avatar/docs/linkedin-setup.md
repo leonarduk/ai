@@ -43,16 +43,16 @@ the live app or landing page.
 
 Edit freely — this is a starting point, not a script.
 
-> I built an AI version of myself that can talk about my career and my GitHub projects. Try it: [landing page link]
+> I built an AI version of myself that can talk about my career and my GitHub projects. Try it: https://leonarduk.github.io/ai-systems-lab/projects/08-linkedin-avatar/site
 >
 > A few things I wanted to get right:
 >
 > - It only answers from what's actually true — a redacted copy of my CV and a live snapshot of my public repos, refreshed nightly. If it doesn't know something, it says so instead of making it up.
 > - It's cheap to run. I picked DeepSeek over a bigger-name API specifically so a demo page doesn't cost real money to leave running — and then designed around that constraint on purpose.
 > - It has real guardrails: rate limits, an input cap, and a hard daily spend kill-switch. A public endpoint with an API key behind it needs those from day one, not as an afterthought.
-> - Want to get in touch after chatting with it? Tell it, and your details come straight to me.
+> - Want to get in touch after chatting with it? Tell it, and your details come straight to me as a Telegram message.
 >
-> It's part of a bigger repo where I'm building production-quality AI tooling and writing up what I learn, mistakes included: [repo link — https://github.com/leonarduk/ai-systems-lab]
+> It's part of a bigger effort where I'm building production-quality AI tooling and writing up what I learn, mistakes included.
 >
 > Happy to talk through how any of it works.
 

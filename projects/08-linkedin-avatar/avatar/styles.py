@@ -10,7 +10,7 @@ DESCRIPTION = (
 )
 
 EXAMPLE_QUESTIONS = [
-    "What's his experience with Python and financial services?",
+    "What AI system did he build at JPMorgan?",
     "Tell me about issue-worm.",
     "Would he be a good fit for a staff engineering role?",
     "How do I get in touch with him?",
