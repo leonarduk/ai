@@ -28,7 +28,18 @@ Landing page URL (what LinkedIn should link to, never the raw Render URL):
 2. Under **Website**, click **Add website** → type **Portfolio** (or **Other** if Portfolio isn't
    offered) → paste the landing page URL above → **Save**.
 
-## 3. Launch post (draft)
+## 3. Update the existing "Projects" entry
+
+There's already a **Projects** section entry for this ("AI Systems Lab" → sub-project "Steve Leonard
+— AI Twin"), added before the app was deployed — it currently links to the GitHub repo instead of
+the live app or landing page.
+
+1. On your profile, find that project entry → the edit (pencil) icon.
+2. Update its link to the landing page URL above (or the live app URL directly, if you'd rather send
+   people straight into the chat).
+3. Save.
+
+## 4. Launch post (draft)
 
 Edit freely — this is a starting point, not a script.
 
@@ -45,7 +56,7 @@ Edit freely — this is a starting point, not a script.
 >
 > Happy to talk through how any of it works.
 
-## 4. Verify
+## 5. Verify
 
 Once both are live, reload your public profile (or use an incognito window — Featured content can
 render differently to you than to a visitor) and confirm:
