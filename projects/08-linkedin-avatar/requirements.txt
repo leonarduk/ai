@@ -1,5 +1,8 @@
 openai>=1.50.0
-gradio>=4.44.0
+# app.py relies on Gradio 6-only API shapes: css moved from Blocks() to
+# launch(), and ChatInterface history is dict-based only (no more tuples) —
+# do not loosen this below 6.0, the app breaks silently on an older release.
+gradio>=6.0.0
 pypdf>=4.3.0
 requests>=2.31.0
 python-dotenv>=1.0.1
