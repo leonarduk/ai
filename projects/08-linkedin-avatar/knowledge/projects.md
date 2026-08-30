@@ -28,6 +28,13 @@ frontend) that tracks pitch against a MusicXML score using GPU or CPU pitch engi
 streamed over WebSocket. It's the one project here that's nothing to do with finance — a personal
 interest (I sing) turned into a real-time systems problem worth solving properly.
 
+## unison
+
+A Java GUI app built for my MSc dissertation: downloads and visualises Usenet (NNTP) discussion
+messages, exporting them as Pajek network data for social network analysis. Referenced in the final
+chapter of *The SAGE Handbook of Social Network Analysis* (2011) — the oldest project here by a wide
+margin, from 2007/2008.
+
 ## 01-mcp-server-suite
 
 A collection of MCP servers giving LLMs structured access to external systems — GitHub, filesystem,
