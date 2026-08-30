@@ -3,9 +3,16 @@
 An AI twin that talks to visitors about my career and my GitHub projects — one link, dropped into
 the Featured section of my LinkedIn profile.
 
-**Status:** design agreed, implementation not started. See [`docs/design.md`](./docs/design.md) and
-the 16 issues in
+**Status:** most of the app is built; not yet deployed. See [`docs/design.md`](./docs/design.md)
+and the issues in
 [milestone 4 — LinkedIn Avatar M1](https://github.com/leonarduk/ai-systems-lab/milestone/4).
+
+**Live URLs** *(filled in once issue #130's deploy is done)*:
+- App: *TODO — Render URL*
+- Landing page: *TODO — GitHub Pages URL*
+
+See [`docs/deployment.md`](./docs/deployment.md) for exactly how to deploy, rotate a key, check
+logs, or take it down in a hurry.
 
 ## What it does
 
