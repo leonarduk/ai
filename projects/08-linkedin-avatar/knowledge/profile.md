@@ -31,14 +31,13 @@ Senior software engineer with 20+ years in financial services,
 primarily building Java-based systems — distributed services, risk
 platforms, and high-throughput data processing — with growing
 depth in applied AI and LLM integration.Most recently at JPMorgan,
-I designed and delivered a natural-language query system over
-financial databases: an LLM-powered internal chatbot with enterprise
-authentication that exposed MCP tool servers and generated SQL
-against a Sybase IQ warehouse, built on Java/Spring Boot services.
-I built the retrieval and context-guidance layer that kept SQL
-generation safe, auditable, and aligned with internal data controls
-— the kind of work where solid backend engineering and modern AI
-capabilities reinforce each other, rather than AI being bolted on.My
+I designed and built a natural-language query system over
+financial databases end to end: an LLM-powered internal chatbot with
+enterprise authentication, backed by a three-tool MCP server I built
+for discovery, context retrieval and auditable SQL generation against
+a Sybase IQ warehouse, on Java/Spring Boot services — the kind of work
+where solid backend engineering and modern AI capabilities reinforce
+each other, rather than AI being bolted on.My
 background spans Swiss Re, Credit Suisse, Morgan Stanley, and
 JPMorgan across risk platforms, distributed services, and cloud
 infrastructure — mostly Java, with Python where it's the right tool for
