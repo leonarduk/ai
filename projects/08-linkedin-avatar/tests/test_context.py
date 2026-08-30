@@ -78,6 +78,36 @@ class TestBuildSystemPrompt:
         prompt = context.build_system_prompt(knowledge_dir=tmp_path)
         assert context.ROLE_BLOCK in prompt
 
+    def test_malformed_github_json_structure_degrades_to_profile_only(
+        self, tmp_path, caplog
+    ):
+        (tmp_path / "summary.txt").write_text("Summary text.", encoding="utf-8")
+        (tmp_path / "profile.md").write_text("Profile text.", encoding="utf-8")
+        # Structurally valid JSON, but a dict instead of the expected list.
+        (tmp_path / "github.json").write_text(
+            json.dumps({"repos": []}), encoding="utf-8"
+        )
+
+        with caplog.at_level("WARNING"):
+            prompt = context.build_system_prompt(knowledge_dir=tmp_path)
+
+        assert "Summary text." in prompt
+        assert any("not a JSON list" in record.message for record in caplog.records)
+
+    def test_reads_budget_from_env_var(self, knowledge_dir, monkeypatch):
+        monkeypatch.setenv("AVATAR_MAX_CONTEXT_TOKENS", "5")
+
+        with pytest.raises(context.PromptTooLargeError) as exc_info:
+            context.build_system_prompt(knowledge_dir=knowledge_dir)
+
+        assert "5" in str(exc_info.value)
+
+    def test_explicit_max_tokens_overrides_env_var(self, knowledge_dir, monkeypatch):
+        monkeypatch.setenv("AVATAR_MAX_CONTEXT_TOKENS", "5")
+
+        # Should not raise: the explicit argument wins over the env var.
+        context.build_system_prompt(max_tokens=40000, knowledge_dir=knowledge_dir)
+
     def test_no_volatile_timestamp_content(self, knowledge_dir):
         prompt = context.build_system_prompt(knowledge_dir=knowledge_dir)
         # A static pushed_at date (YYYY-MM-DD) is legitimate committed data;

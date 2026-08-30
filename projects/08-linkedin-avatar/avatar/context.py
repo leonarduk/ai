@@ -9,6 +9,7 @@ timestamps, no request IDs, no randomised ordering. See docs/design.md §4.
 import json
 import logging
 import math
+import os
 from pathlib import Path
 
 logger = logging.getLogger(__name__)
@@ -56,12 +57,22 @@ def _load_github_records(path):
         )
         return []
     try:
-        return json.loads(path.read_text(encoding="utf-8"))
+        data = json.loads(path.read_text(encoding="utf-8"))
     except json.JSONDecodeError:
         logger.warning(
             "GitHub snapshot at %s is not valid JSON; using a profile-only prompt", path
         )
         return []
+
+    if not isinstance(data, list):
+        logger.warning(
+            "GitHub snapshot at %s is not a JSON list (got %s); using a profile-only prompt",
+            path,
+            type(data).__name__,
+        )
+        return []
+
+    return data
 
 
 def _format_index_line(record):
@@ -115,10 +126,18 @@ def _github_section(records, section_budget):
     return "\n\n".join(lines)
 
 
+def _default_max_tokens():
+    raw = os.environ.get("AVATAR_MAX_CONTEXT_TOKENS")
+    if raw is None:
+        return DEFAULT_MAX_CONTEXT_TOKENS
+    return int(raw)
+
+
 def build_system_prompt(max_tokens=None, knowledge_dir=None):
-    """Assemble the system prompt. Pure function of the files on disk."""
+    """Assemble the system prompt. Pure function of the files on disk
+    and of AVATAR_MAX_CONTEXT_TOKENS (unless max_tokens is given explicitly)."""
     knowledge_dir = knowledge_dir or KNOWLEDGE_DIR
-    max_tokens = DEFAULT_MAX_CONTEXT_TOKENS if max_tokens is None else max_tokens
+    max_tokens = _default_max_tokens() if max_tokens is None else max_tokens
 
     summary = _read_text_file(knowledge_dir / "summary.txt") or ""
     profile = _read_text_file(knowledge_dir / "profile.md") or ""
