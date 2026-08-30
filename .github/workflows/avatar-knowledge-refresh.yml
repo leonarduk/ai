@@ -1,0 +1,50 @@
+name: Avatar knowledge refresh
+
+on:
+  schedule:
+    - cron: "15 4 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  refresh:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install dependencies
+        working-directory: projects/08-linkedin-avatar
+        run: pip install -r requirements.txt
+        shell: bash
+
+      - name: Rebuild GitHub knowledge snapshot
+        working-directory: projects/08-linkedin-avatar
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: python build/build_github_snapshot.py --user leonarduk
+        shell: bash
+
+      # Scheduled runs never execute on a fork (GitHub disables cron
+      # triggers there), but a manual workflow_dispatch could — this keeps
+      # such a run green without attempting a push it has no business
+      # making.
+      - name: Commit and push if the snapshot changed
+        if: github.repository == 'leonarduk/ai-systems-lab'
+        run: |
+          set -euo pipefail
+          if git diff --quiet -- projects/08-linkedin-avatar/knowledge/github.json; then
+            echo "No changes to knowledge/github.json"
+            exit 0
+          fi
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add projects/08-linkedin-avatar/knowledge/github.json
+          git commit -m "chore: refresh avatar GitHub knowledge snapshot"
+          git push
+        shell: bash
