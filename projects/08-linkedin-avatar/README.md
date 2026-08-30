@@ -8,7 +8,7 @@ the Featured section of my LinkedIn profile.
 
 **Live URLs**:
 - App: [ai-systems-lab-s8gy.onrender.com](https://ai-systems-lab-s8gy.onrender.com)
-- Landing page: *TODO — GitHub Pages URL*
+- Landing page: [leonarduk.github.io/ai-systems-lab/projects/08-linkedin-avatar/site/](https://leonarduk.github.io/ai-systems-lab/projects/08-linkedin-avatar/site/)
 
 See [`docs/deployment.md`](./docs/deployment.md) for exactly how to deploy, rotate a key, check
 logs, or take it down in a hurry.
@@ -24,7 +24,8 @@ it doesn't know something, it says so and records the question rather than inven
 
 Its knowledge is three plain-text files baked into a cached system prompt: a hand-written
 `summary.txt` for voice, a `profile.md` derived from my LinkedIn PDF export with contact details
-redacted, and a `github.json` snapshot of my public repos refreshed nightly by a GitHub Action.
+redacted, and a `github.json` snapshot of my public repos refreshed nightly by a GitHub Action — so
+a new repo anywhere in this org shows up in what the twin knows within a day, no redeploy needed.
 There are three tools — record a contact, record an unanswerable question, look up one project in
 detail — and no database.
 

@@ -1,0 +1,43 @@
+name: Avatar keep-warm ping
+
+on:
+  schedule:
+    # Every ~14 minutes, 07:00-22:59 UTC. Render's free tier sleeps after 15
+    # minutes idle, so a 14-minute cadence keeps the app continuously warm
+    # through this window instead of cold-starting on a visitor's request.
+    #
+    # Instance-hours (see docs/design.md §9 in projects/08-linkedin-avatar):
+    # Render gives 750 instance-hours/month, shared across the whole
+    # workspace, and a sleeping service uses none. This 16h/day window costs
+    # roughly 16 * 31 = 496 instance-hours/month — well inside the allowance
+    # even with a second free service sharing it. Pinging a single service
+    # 24/7 (744h in a 31-day month) would also technically fit, with about
+    # six hours of headroom — the partial window is a deliberate choice to
+    # keep more of that headroom, not an arithmetic necessity. Widening to
+    # 24/7 is a legitimate call if this ever becomes the only free service
+    # running and always-warm is wanted — just re-check the current
+    # allowance first.
+    - cron: "*/14 7-22 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  ping:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Ping the app (retry once, never fail the run on a transient miss)
+        run: |
+          set -uo pipefail
+          url="https://ai-systems-lab-s8gy.onrender.com"
+          attempt() { curl -sSf --max-time 60 "$url" -o /dev/null; }
+
+          if attempt; then
+            echo "Ping succeeded"
+          elif attempt; then
+            echo "Retry succeeded"
+          else
+            echo "::warning::Both keep-warm pings failed — app may be down or slow to wake"
+          fi
+        shell: bash
