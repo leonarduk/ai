@@ -42,6 +42,24 @@ over the repo's own README excerpt wherever one exists — a repo with no headin
 to its README. Headings are matched case-sensitively against the repo name; keep them in the same
 order as the root README where practical, but order isn't semantically meaningful to the parser.
 
+## Evals
+
+`evals/run_evals.py` runs `evals/cases.yaml`'s ~15 behavioural cases against the real DeepSeek API
+and prints a pass/fail table plus an estimated cost. It's a manual regression suite for prompt
+changes — run it after any edit to `summary.txt`, `projects.md` or the rules block in
+`avatar/context.py`, before deploying:
+
+```bash
+python evals/run_evals.py
+python evals/run_evals.py --model deepseek-v4-pro   # compare a different model
+```
+
+Every assertion targets *behaviour* (a tool call, a required or forbidden substring/pattern in the
+reply), never exact wording, so a harmless rewording of an answer doesn't fail the suite. Pushover
+is stubbed for the whole run — no case can ever send a real notification, regardless of what's in
+the environment. Deliberately **not** wired into CI: it costs real money and needs
+`DEEPSEEK_API_KEY`, so it's run by hand, not on every push.
+
 ## Prior art
 
 Built on the shape of [ed-donner/agents](https://github.com/ed-donner/agents) `1_foundations/twin`
