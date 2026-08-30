@@ -1,0 +1,244 @@
+[
+  {
+    "curated_note": null,
+    "description": "Self-directed learning project building AI systems tools. Created 7 MCP servers that enable LLMs to interact with GitHub, filesystems, and web APIs. Learning to apply backend engineering patterns (rate limiting, security, error handling) to AI systems.",
+    "languages": [
+      "Python",
+      "Dockerfile"
+    ],
+    "name": "ai-systems-lab",
+    "pushed_at": "2026-08-30",
+    "readme_excerpt": "AI Systems Lab\n\nPersonal portfolio demonstrating AI systems engineering capabilities.\n\nThis repository documents my transition into AI systems engineering. Rather than just theory, I'm building production-quality tools and learning by doing. Some projects outgrow this lab and become their own repos \u2014 those are listed separately below.\n\n---\n\n\ud83c\udfaf What I'm Building (in this repo)\n\nMCP Server Suite\nA collection of production-ready Model Context Protocol servers that enable LLMs to interact with external systems \u2014 GitHub, filesystems, git operations, email, web search, and more.\n\nStatus: Production-ready, actively maintained\nTech stack: Python, AsyncIO, MCP Protocol, REST APIs, GitHub API, SMTP\n\nGitHub SDK App\nA GitHub App built on the GitHub SDK for automating repo/issue/PR workflows.\n\nGmail Inbox Labeler\nMoves messages out of a Gmail inbox into existing labels using a local Ollama model to classify them \u2014 no email content ever leaves the machine to a hosted LLM.\n\nTech stack: Python, Gmail API (OAuth2), Ollama\n\nLLM Cost Comparison\nInteractive tool that estimates and compares the real cost of running an LLM locally (owned hardware or rented cloud GPU) against hosted APIs, based on your ow",
+    "stars": 1,
+    "topics": [],
+    "url": "https://github.com/leonarduk/ai-systems-lab"
+  },
+  {
+    "curated_note": "My biggest and most active personal project by a distance: a Python/FastAPI investment and portfolio\ntracking platform on AWS CDK/Lambda, with thousands of commits and an AI-powered PR review pipeline\n(Claude, GPT, DeepSeek) running on every pull request. It's the clearest evidence of what an\nAI-directed workflow looks like in practice \u2014 I'm mostly directing and reviewing rather than typing,\nand the commit history shows it. `allotmint-pro` and `allotmint-mcp` (a standalone MCP server exposing\nthe platform, including an agentic research tool, to AI clients) sit alongside it.",
+    "description": "Serverless investment tracking and portfolio analytics system with React frontend, FastAPI backend, and AWS deployment",
+    "languages": [
+      "Python",
+      "TypeScript",
+      "Shell",
+      "PowerShell",
+      "CSS",
+      "JavaScript",
+      "HTML",
+      "Makefile",
+      "Dockerfile"
+    ],
+    "name": "allotmint",
+    "pushed_at": "2026-08-30",
+    "readme_excerpt": "AllotMint \ud83c\udf31\ud83d\udcb7\n\nAllotMint is a family investing platform with a FastAPI backend, React/TypeScript frontend, and AWS deployment support.\n\nOpen-core editions\n\nThis repository is the public AllotMint application shell. It boots and serves\nthe free portfolio-management routes without any private dependency. The paid\nengine is distributed separately as the private\nallotmint-pro package.\n\n| Public application | Optional allotmint-pro engine |\n| --- | --- |\n| FastAPI and React application, portfolio data and reports, authentication, and local/demo workflows | Fundamental screener, VaR and Sharpe calculations, compliance rules, tax allowances, and anomaly repair |\n\nPremium endpoints remain present in the public API contract. When\nallotmint-pro is not installed, they return HTTP 402 Payment Required with\nan upgrade pointer instead of preventing the application from starting. Users\nwith access to the private package can install the integration extra with\npython -m pip install '.[pro]'.\n\nScreenshots\n\n| Portfolio view | Screener |\n| --- | --- |\n|  |  |\n\n| Reports | Mobile |\n| --- | --- |\n|  |  |\n\nLanguage guidelines\n\nAll code, comments, commit messages, documentation, and PR/issue text in this\nr",
+    "stars": 1,
+    "topics": [
+      "aws",
+      "aws-cdk",
+      "aws-lambda",
+      "fastapi",
+      "investing",
+      "portfolio",
+      "python",
+      "react",
+      "typescript"
+    ],
+    "url": "https://github.com/leonarduk/allotmint"
+  },
+  {
+    "curated_note": null,
+    "description": "Standalone MCP server for AllotMint (Spring Boot 4.1.0 + Java 25, MCP Java SDK) \u2014 Spring Boot MCP server for AllotMint API + local file access",
+    "languages": [
+      "Python",
+      "Java",
+      "PowerShell",
+      "Dockerfile"
+    ],
+    "name": "allotmint-mcp",
+    "pushed_at": "2026-08-30",
+    "readme_excerpt": "allotmint-mcp\n\nStandalone MCP server for AllotMint, built with Spring Boot 4.1.0, Java 25, and the MCP Java SDK. It exposes the same tools over stdio (for Claude Desktop and MCP Inspector) and HTTP streamable transport (/mcp).\n\nFor the intended users, product boundaries, build-versus-buy decisions, and rough running-cost\nprofile, see Product framing.\n\nArchitecture\n\n```mermaid\nflowchart LR\n    subgraph clients[\"MCP clients\"]\n        CD[\"Claude Desktop /\\nother MCP clients\"]\n        CLI[\"mcp-client CLI\\n(client.py)\"]\n        WEBUI[\"webui.py /\\ngradio_ui.py\"]\n    end\n\n    subgraph server[\"allotmint-mcp server (Java, Spring Boot, MCP Java SDK)\"]\n        MCP[\"MCP tools\\nallotmint_health / instrument / market /\\nportfolio / reconcile / data_quality\"]\n        RESEARCH[\"allotmint_research (opt-in)\"]\n    end\n\n    BACKEND[(\"AllotMint backend\\n(REST API)\")]\n\n    subgraph sidecar[\"research-agent sidecar (Python, FastAPI, Pydantic AI)\"]\n        AGENT[\"/research/ask\"]\n        RETRIEVAL[\"retrieval.py\"]\n    end\n\n    PGVECTOR[(\"pgvector\\n(Postgres)\")]\n    LLM[\"LLM\\n(Ollama local, or DeepSeek/OpenAI-compatible)\"]\n\n    CD -- \"stdio or HTTP /mcp\" --> MCP\n    CLI -- \"streamable HTTP /mcp\" --> MCP\n    W",
+    "stars": 0,
+    "topics": [],
+    "url": "https://github.com/leonarduk/allotmint-mcp"
+  },
+  {
+    "curated_note": "CLI and automation tooling for AI-assisted GitHub issue and PR workflows \u2014 setup, review, and triage.\nBuilt to support the same kind of AI-directed development I use on `allotmint` and this lab, rather\nthan as a one-off experiment.",
+    "description": "GitHub issue/PR plumbing CLI (free shell) - the LLM review/triage engine is cicaid-pro",
+    "languages": [
+      "Python",
+      "Shell"
+    ],
+    "name": "cicaid",
+    "pushed_at": "2026-08-28",
+    "readme_excerpt": "cicaid\n\nOne CLI for the GitHub-plumbing every repo ends up needing: sync issues,\nbranch onto one, check out a PR, run the repo's local CI checks, link a PR\nback to its issue, auto-merge green Dependabot PRs. Install once \u2014 every\ncommand auto-detects the repo from your origin remote.\n\nThis is the free shell. The LLM-backed commands (triage-issues,\nreview-issue, create-issue, local-review, pr-review,\ncommit-and-push, implement-issue-with-aider, clear-ai-slop-issues) are\npart of cicaid-pro, a private\npackage \u2014 cicaid  reports itself unavailable with a pointer there\nuntil it's installed.\n\nInstall\n\n```bash\npip install \"cicaid-devtools @ https://github.com/leonarduk/cicaid/releases/download/v0.3.0/cicaid_devtools-0.3.0-py3-none-any.whl\"\n```\n\nThis always points at the latest release \u2014 the install command above is updated\nautomatically as part of every release, so it never goes stale. Want an older\nversion instead? See Releases for\nevery version's exact install command.\n\nThe standard installation loads GITHUB_TOKEN and similar from a repo-root\n.env file for local runs (CI should set real env vars instead). The historical\n[dotenv] extra remains available as a backwards-compatible alias:\n\n``",
+    "stars": 0,
+    "topics": [],
+    "url": "https://github.com/leonarduk/cicaid"
+  },
+  {
+    "curated_note": null,
+    "description": "For CozyCatsLondon site",
+    "languages": [
+      "CSS",
+      "HTML"
+    ],
+    "name": "cozycatslondon",
+    "pushed_at": "2024-11-05",
+    "readme_excerpt": "cozycatslondon\n\nThis publishes to \nhttp://cozycatslondon.co.uk",
+    "stars": 0,
+    "topics": [],
+    "url": "https://github.com/leonarduk/cozycatslondon"
+  },
+  {
+    "curated_note": "A multi-agent coder that works GitHub issues end-to-end, using local LLMs via Ollama. It started as\n`07-multi-agent-coder` inside this lab and outgrew it enough to become its own repo. It's deliberately\nscoped as a fallback for when cloud LLM tokens (Claude, DeepSeek) run out, not a competitor to a\nfully-tokened cloud coding session \u2014 judge it against \"one local model, no scaffolding\" as the\nbaseline, and it earns its complexity by beating that.",
+    "description": "Local LLM issue-to-PR pipeline: GitHub issues as the queue (free shell)",
+    "languages": [
+      "Python"
+    ],
+    "name": "issue-worm",
+    "pushed_at": "2026-08-26",
+    "readme_excerpt": "issue-worm\n\nGive it an issue. It sorts it out.\n\nissue-worm turns GitHub issues into pull requests using LLMs. This repo is\nthe free shell: issue filing, a standalone single-pass build, and run\nhistory. The full automated review \u2192 implement \u2192 verify pipeline with a\nverifier/retry loop and a scheduler (triage, poll) is\nissue-worm-pro, a private\npackage \u2014 see Access below.\n\nInstalling issue-worm-pro upgrades this shell in place rather than\nreplacing it: the issue-worm command stays the same, and build starts\nrunning pro's full pipeline instead of the single pass described here.\n\nWhat this package does today\n\n- issue-worm create \u2014 file a new issue, guided interactively (via\n  cicaid).\n- issue-worm build  --repo owner/name \u2014 a deterministic\n  (non-LLM) check that the issue is scoped enough to dispatch (an\n  ## Implementation notes section with FILES:/DONE:), then a single\n  pass through a local Ollama coder that writes the proposed changes to\n  the working tree. No verifier/retry loop, no scheduler. **With\n  issue-worm-pro installed this command runs pro's pipeline instead**, so\n  the behaviour described here is what you get on the free tier alone.\n- issue-worm history \u2014 list or inspect",
+    "stars": 0,
+    "topics": [],
+    "url": "https://github.com/leonarduk/issue-worm"
+  },
+  {
+    "curated_note": null,
+    "description": "",
+    "languages": [],
+    "name": "leonarduk",
+    "pushed_at": "2026-08-26",
+    "readme_excerpt": "Steve Leonard\nSenior software engineer with 20+ years in financial services, \ncurrently expanding into AI and LLM-powered systems.\n\nWhat I build\n- \ud83e\udd16 LLM-powered systems and MCP tool servers\n- \u2601\ufe0f Serverless AWS architectures  \n- \ud83d\udcca Financial data platforms and risk systems\n- \ud83c\udfb5 Real-time audio/DSP systems with CUDA-accelerated ML inference\n\nCurrently working on\n\nCiCAID, IssueWorm, and Doodlebug - tools to automate and simplify code development from issue to release\n- cicaid (public) \u2014 GitHub plumbing CLI: sync issues, work-on-issue/PR, dependabot auto-merge, local CI checks, PR linking\n- cicaid-pro (private) \u2014 adds the AI engine on top: LLM code review for local diffs and PRs (Claude/DeepSeek/GPT/Ollama), issue triage and AI-slop cleanup, AI-drafted commit/PR messages, aider integration\n- issue-worm (public) \u2014 CLI shell: config, workspace management, run history, version checks\n- issue-worm-pro (private) \u2014 the multi-agent engine: Coder\u2192Verifier\u2192Analyser orchestration loop, scheduler (poll/dispatch/label lifecycle), the coder/analyser/triage agents, and the cicaid-pro bridge\n- doodlebug (private) \u2014 CLI tool that audits a website against a QA plan specified in YAML \u2014 it will be split in",
+    "stars": 0,
+    "topics": [],
+    "url": "https://github.com/leonarduk/leonarduk"
+  },
+  {
+    "curated_note": null,
+    "description": "Python CLI that converts OpenAPI/Swagger specifications into production-ready MCP server templates in TypeScript",
+    "languages": [
+      "Python",
+      "TypeScript",
+      "Jinja"
+    ],
+    "name": "mcp-toolsmith",
+    "pushed_at": "2026-03-24",
+    "readme_excerpt": "mcp-toolsmith\n\nGenerate production-ready TypeScript MCP server templates directly from OpenAPI 3.x specs.\n\nInstall\n\n```bash\npip install mcp-toolsmith\n```\n\nQuick usage\n\n```bash\nmcp-toolsmith generate https://petstore3.swagger.io/api/v3/openapi.json --out generated-petstore\n```\n\nThen run the generated server:\n\n```bash\ncd generated-petstore\nnpm install\nnpm run build\nnpm start\n```\n\nFor a complete walkthrough (including Claude Desktop setup), see Quickstart.\n\nPython CLI that converts OpenAPI/Swagger specifications into production-ready MCP server templates in TypeScript.\n\nQuick install\n\n```bash\npip install mcp-toolsmith\n```\n\nFeatures\n\n| Capability | Status | Notes |\n| --- | --- | --- |\n| OpenAPI 3.x ingestion | \u2705 | Validates and extracts operations from OpenAPI 3.x documents. |\n| TypeScript ESM output | \u2705 | Generates a Node 20+ ESM MCP server scaffold. |\n| Quality score report | \u2705 | Emits scoring dimensions and findings in CLI output/report.json. |\n| Agent integration snippets | \u2705 | Generates Claude Desktop, VS Code, and LangChain snippets. |\n\nDocumentation\n\n- Quickstart\n- Troubleshooting FAQ\n- Architecture ADRs\n- Petstore golden example output",
+    "stars": 0,
+    "topics": [],
+    "url": "https://github.com/leonarduk/mcp-toolsmith"
+  },
+  {
+    "curated_note": null,
+    "description": "Serverless pipeline tracking UK house price statistics using AWS Lambda, DynamoDB, API Gateway and Terraform \u2014 built to support a published Medium article",
+    "languages": [
+      "HTML",
+      "HCL",
+      "Python",
+      "Jupyter Notebook",
+      "Batchfile"
+    ],
+    "name": "medium-lambda-web-scraper-demo",
+    "pushed_at": "2024-07-06",
+    "readme_excerpt": "medium-lambda-web-scraper-demo\nProject code to support an article written on Medium.com\n\nPart One\n\nhttps://medium.com/@steveleonard11/how-i-track-house-price-stats-using-aws-lambda-dynamodb-api-gateway-and-terraform-part-one-d04e4b416b6a\n\nCode is in the part_one folder and contains all the code needed to implement the code mentioned in the first article.\n\nPart Two\n\nhttps://medium.com/@steveleonard11/how-i-track-house-price-stats-using-aws-lambda-dynamodb-api-gateway-and-terraform-part-two-9f087b924c19\n\nCode is in the part_two folder and contains all the code in part_one.\nThis is so that you can create fewer Terraform workspaces if you are using\nthis as a template for your own work.",
+    "stars": 1,
+    "topics": [],
+    "url": "https://github.com/leonarduk/medium-lambda-web-scraper-demo"
+  },
+  {
+    "curated_note": null,
+    "description": "A tool that reads timeseries from Yahoo and Alphavantage and does analysis.  ",
+    "languages": [
+      "Java",
+      "Python",
+      "JavaScript",
+      "Kotlin",
+      "HTML",
+      "Batchfile",
+      "Dockerfile"
+    ],
+    "name": "pension-risk-management-system",
+    "pushed_at": "2026-08-22",
+    "readme_excerpt": "pension-risk-management-system\n\n \n\nA tool that reads timeseries from Yahoo and Alphavantage and does analysis.\n\nDevelopment\n\nJava modules are formatted with Spotless using the Google Java Style.  Use mvn spotless:apply to format sources and mvn verify to run the check.\n\nThe timeseries-python module relies on pre-commit with black and flake8 for formatting and linting:\n\n```bash\npip install pre-commit\npre-commit run --all-files\n```\n\nThe GitHub Actions workflow runs these tools on every push and pull request.\n\nRunning tests\n\nExecute the full test suite across all modules:\n\nJava modules\n\n```bash\nmvn verify\n```\n\nKotlin (Android)\n\n```bash\ncd android-app\n./gradlew test\nInstrumentation tests require an emulator:\n./gradlew connectedAndroidTest\n```\n\nPython\n\n```bash\ncd timeseries-python\npre-commit run --all-files\npip install -r requirements-test.txt\npytest --basetemp=.pytest_tmp\n```\n\nFrontend\n\n```bash\ncd ui\nnpm install\nnpm test\n```\n\nConfiguration\n\nThe Alphavantage feed requires one or more API keys supplied via the\nALPHAVANTAGE_API_KEYS environment variable. Provide a comma-separated\nlist and keep the values out of source control:\n\n```bash\nexport ALPHAVANTAGE_API_KEYS=key1,key2\n```\n\nMissing o",
+    "stars": 0,
+    "topics": [],
+    "url": "https://github.com/leonarduk/pension-risk-management-system"
+  },
+  {
+    "curated_note": "A real-time pitch-tracking practice tool for choir singers: a Windows desktop app (TypeScript/Electron\nfrontend) that tracks pitch against a MusicXML score using GPU or CPU pitch engines (CUDA/torchcrepe),\nstreamed over WebSocket. It's the one project here that's nothing to do with finance \u2014 a personal\ninterest (I sing) turned into a real-time systems problem worth solving properly.",
+    "description": "Practice your choir part. Hear the notes. Sing along. See your pitch in real time.",
+    "languages": [
+      "TypeScript",
+      "Python",
+      "HTML",
+      "JavaScript",
+      "CSS",
+      "Just",
+      "Shell"
+    ],
+    "name": "sing-attune",
+    "pushed_at": "2026-08-26",
+    "readme_excerpt": "sing-attune\n\nPractice your choir part. Hear the notes. Sing along. See your pitch in real time.\n\nSee ARCHITECTURE.md for the current module boundaries and\nthe working open-core classification.\n\nsing-attune plays your part from a MusicXML score through your headphones. You sing along. As you sing, your pitch appears live on the score \u2014 a moving dot over the notation, green when you're on it, red when you're not. No post-hoc analysis, no percentage scores. Just an honest mirror of what your voice is doing, in the moment, against what the music asks for.\n\nDemo\n\nDemo GIF is shared in the PR/release notes (kept out of the repository to avoid committing binary assets).\n\n---\n\nThe loop\n\n1. Load a MusicXML file (MuseScore, Sibelius, Finale, Audiveris)\n2. Select your part\n3. Press play \u2014 the score plays piano tones through your headphones\n4. Sing along\n5. Watch your pitch trace appear over the score in real time\n\nThat's it.\n\n---\n\nPitch graph panel\n\nThe UI now includes a dedicated pitch graph canvas under the toolbar:\n\n- Semitone grid from C2 to C6 with octave labels\n- Rolling 10-second time window with 1-second vertical grid lines\n- Continuous f0 trace colour-coded against the active target ",
+    "stars": 1,
+    "topics": [],
+    "url": "https://github.com/leonarduk/sing-attune"
+  },
+  {
+    "curated_note": null,
+    "description": "Provides common Terraform code for creating AWS components like Lambda functions",
+    "languages": [
+      "HCL"
+    ],
+    "name": "terraform-leonarduk-common",
+    "pushed_at": "2024-06-11",
+    "readme_excerpt": "terraform-leonarduk-common\nProvides common Terraform code for creating AWS components like Lambda functions\n\nhttps://developer.hashicorp.com/terraform/registry/modules/publish\n\nhttps://developer.hashicorp.com/terraform/language/modules/develop/structure",
+    "stars": 0,
+    "topics": [],
+    "url": "https://github.com/leonarduk/terraform-leonarduk-common"
+  },
+  {
+    "curated_note": null,
+    "description": "",
+    "languages": [
+      "HTML",
+      "Python",
+      "Shell",
+      "CSS"
+    ],
+    "name": "tomleonard",
+    "pushed_at": "2026-03-21",
+    "readme_excerpt": "tomleonard\n\nThis publishes to \nhttp://tomleonard.co.uk\n\nAll content owned by Tom Leonard Literary Estate",
+    "stars": 0,
+    "topics": [],
+    "url": "https://github.com/leonarduk/tomleonard"
+  },
+  {
+    "curated_note": null,
+    "description": "UNISoN is a Java-based NNTP client that can analyse messages to save to a Pajek-format file for Social Network Analysis. Developed as part of an MSc Business Systems Analysis & Design at City University. ",
+    "languages": [
+      "Java",
+      "Shell",
+      "Batchfile"
+    ],
+    "name": "unison",
+    "pushed_at": "2026-08-27",
+    "readme_excerpt": "unison\n\nUNISoN is a Java-based NNTP client that can analyse messages to save to a Pajek-format file for Social Network Analysis.\nDeveloped as part of an MSc Business Systems Analysis &amp; Design at City University.\n\nRun via Java web start - this is self-signed so you need to\nallow it\n\nTo run from source use the uk.co.sleonard.unison.UnisonMain class. The legacy DownloadNewsPanel.main remains for\ntesting.\n\nJust Go To *Startmenu >>Java >>Configure Java >> Security >> Edit site list >> Add >> \"http://unison.leonarduk.com/\" >>\nOK",
+    "stars": 6,
+    "topics": [],
+    "url": "https://github.com/leonarduk/unison"
+  },
+  {
+    "curated_note": null,
+    "description": "This contains code used by other projects to scrape from websites",
+    "languages": [
+      "Java",
+      "HTML",
+      "Shell"
+    ],
+    "name": "webscraper-core",
+    "pushed_at": "2026-08-22",
+    "readme_excerpt": "webscraper-core\n\nUsed by\n* leonarduk/pension-risk-management-system",
+    "stars": 0,
+    "topics": [],
+    "url": "https://github.com/leonarduk/webscraper-core"
+  }
+]
