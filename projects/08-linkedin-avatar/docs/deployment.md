@@ -34,6 +34,8 @@ Render's free web-service tier. One-time setup:
    | `AVATAR_IP_RATE_LIMIT` | `40/day` | Optional |
    | `PUSHOVER_USER` | *(secret)* | Optional — without it, `record_contact`/`record_unknown_question` log instead of notifying |
    | `PUSHOVER_TOKEN` | *(secret)* | Optional, pairs with `PUSHOVER_USER` |
+   | `TELEGRAM_BOT_TOKEN` | *(secret)* | Optional — from [@BotFather](https://t.me/BotFather); another channel for the same two tools, independent of Pushover |
+   | `TELEGRAM_CHAT_ID` | *(secret)* | Optional, pairs with `TELEGRAM_BOT_TOKEN` — your numeric chat ID, e.g. from [@userinfobot](https://t.me/userinfobot) |
    | `GRADIO_SERVER_NAME` | `0.0.0.0` | **Required** — Render routes traffic to this, not `127.0.0.1` |
    | `GRADIO_SERVER_PORT` | `10000` | **Required** — must match the port Render expects |
 
@@ -79,7 +81,7 @@ down", rotating that one key (below) is faster than suspending and doesn't inter
 
 ### Rotating a key
 
-1. Generate a new key at the provider (DeepSeek, Pushover).
+1. Generate a new key at the provider (DeepSeek, Pushover, Telegram's @BotFather).
 2. Render dashboard → the service → Settings → Environment → update the variable's value.
 3. Render redeploys automatically on an environment variable change.
 4. Revoke the old key at the provider once the new deploy is confirmed live (see the smoke test
@@ -120,9 +122,10 @@ redeploy:
 2. Ask it a real question — e.g. "Tell me about issue-worm." — and confirm it answers correctly,
    grounded in the actual knowledge files, not a generic non-answer.
 3. Say something that should trigger `record_contact` (e.g. "I'd like to talk to him about a
-   role, here's my email: test@example.com") and confirm a Pushover notification actually arrives
-   on your phone (or check the Render logs for the "logged instead of sent" line if
-   `PUSHOVER_USER`/`PUSHOVER_TOKEN` aren't set yet).
+   role, here's my email: test@example.com") and confirm a notification actually arrives on
+   whichever channel(s) are configured (Pushover, Telegram, or both — see `tools._notify` in
+   `avatar/tools.py`), or check the Render logs for the "not configured; logging instead" line for
+   any channel that isn't set up yet.
 4. Open the landing page URL, confirm it loads instantly, and click "Start chatting" through to a
    warm app.
 5. Paste the landing page URL into a LinkedIn post's preview (or a tool like

@@ -1,9 +1,10 @@
 """record_contact, record_unknown_question, lookup_project.
 
-Three tools for the DeepSeek tool-use loop (avatar/llm.py). Two send a Pushover
-notification, one reads github.json locally. None of them may raise — a failed
-notification or an unknown project name must degrade to an error result, never
-take down the chat turn. See docs/design.md §5.
+Three tools for the DeepSeek tool-use loop (avatar/llm.py). Two fan a notification
+out to every configured channel (Pushover, Telegram), one reads github.json
+locally. None of them may raise — a failed notification or an unknown project
+name must degrade to an error result, never take down the chat turn. See
+docs/design.md §5.
 """
 
 import difflib
@@ -17,6 +18,7 @@ import requests
 logger = logging.getLogger(__name__)
 
 PUSHOVER_URL = "https://api.pushover.net/1/messages.json"
+TELEGRAM_API_URL = "https://api.telegram.org/bot{token}/sendMessage"
 GITHUB_SNAPSHOT_PATH = (
     Path(__file__).resolve().parent.parent / "knowledge" / "github.json"
 )
@@ -130,6 +132,50 @@ def _pushover_notify(title, message):
     return {"status": "sent"}
 
 
+def _telegram_notify(title, message):
+    """POST a Telegram notification. Never raises — logs and returns a status dict."""
+    token = os.environ.get("TELEGRAM_BOT_TOKEN")
+    chat_id = os.environ.get("TELEGRAM_CHAT_ID")
+
+    if not token or not chat_id:
+        logger.info("Telegram not configured; logging instead. %s: %s", title, message)
+        return {"status": "logged", "detail": "TELEGRAM_BOT_TOKEN/TELEGRAM_CHAT_ID not set"}
+
+    try:
+        response = requests.post(
+            TELEGRAM_API_URL.format(token=token),
+            data={"chat_id": chat_id, "text": f"{title}\n\n{message}"},
+            timeout=10,
+        )
+        response.raise_for_status()
+    except requests.RequestException:
+        logger.exception("Telegram notification failed: %s", title)
+        return {"status": "failed", "detail": "notification could not be sent"}
+
+    return {"status": "sent"}
+
+
+def _notify(title, message):
+    """Fan a notification out to every configured channel. Never raises.
+
+    Overall status is "sent" if any channel sent, "logged" if every channel
+    merely logged (none configured), else "failed" — e.g. a configured
+    channel errored and no other channel picked up the slack.
+    """
+    channels = {
+        "pushover": _pushover_notify(title, message),
+        "telegram": _telegram_notify(title, message),
+    }
+    statuses = {result["status"] for result in channels.values()}
+    if "sent" in statuses:
+        status = "sent"
+    elif statuses == {"logged"}:
+        status = "logged"
+    else:
+        status = "failed"
+    return {"status": status, "channels": channels}
+
+
 def record_contact(email, name=None, notes=None):
     """Notify me that a visitor wants to be contacted."""
     lines = [f"Email: {email}"]
@@ -137,13 +183,13 @@ def record_contact(email, name=None, notes=None):
         lines.append(f"Name: {name}")
     if notes:
         lines.append(f"Notes: {notes}")
-    result = _pushover_notify("LinkedIn Avatar: contact request", "\n".join(lines))
+    result = _notify("LinkedIn Avatar: contact request", "\n".join(lines))
     return {"recorded": result["status"] in ("sent", "logged"), **result}
 
 
 def record_unknown_question(question):
     """Notify me that the avatar didn't know the answer to something."""
-    result = _pushover_notify("LinkedIn Avatar: unknown question", question)
+    result = _notify("LinkedIn Avatar: unknown question", question)
     return {"recorded": result["status"] in ("sent", "logged"), **result}
 
 

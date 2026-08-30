@@ -31,8 +31,9 @@ def load_cases(path=CASES_PATH):
 
 def run_case(case, system_prompt):
     """Run one case against the real API, with tools.dispatch spied on
-    (to see which tools fired) and Pushover stubbed (so nothing real is
-    ever sent, regardless of what's in the environment)."""
+    (to see which tools fired) and every notification channel stubbed via
+    tools._notify (so nothing real is ever sent, regardless of what's in
+    the environment or how many channels are configured)."""
     calls = []
     real_dispatch = tools.dispatch
 
@@ -40,7 +41,7 @@ def run_case(case, system_prompt):
         calls.append(name)
         return real_dispatch(name, arguments)
 
-    with patch.object(tools, "_pushover_notify", return_value={"status": "stubbed"}):
+    with patch.object(tools, "_notify", return_value={"status": "stubbed", "channels": {}}):
         with patch.object(tools, "dispatch", side_effect=spy_dispatch):
             reply, usage = llm.send_message(
                 [{"role": "user", "content": case["question"]}], system_prompt

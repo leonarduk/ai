@@ -65,7 +65,7 @@ flowchart TB
         UI["app.py — Gradio ChatInterface"] --> GRD["guardrails.py<br/>rate limit / length / spend cap"]
         GRD --> LLM
         LLM --> TOOLS["tools.py"]
-        TOOLS -->|record_contact| PUSH["Pushover → Steve's phone"]
+        TOOLS -->|record_contact| PUSH["Pushover / Telegram → Steve's phone"]
         TOOLS -->|record_unknown_question| PUSH
         TOOLS -->|lookup_project| SNAP
     end
@@ -220,8 +220,8 @@ test, since a schema that's valid for a non-strict call can silently stop being 
 
 | Tool | Purpose | Side effect |
 |---|---|---|
-| `record_contact(email, name?, notes?)` | Visitor wants to be contacted | Pushover notification to my phone |
-| `record_unknown_question(question)` | The model doesn't know | Pushover notification — this is the backlog for improving `summary.txt` / `projects.md` |
+| `record_contact(email, name?, notes?)` | Visitor wants to be contacted | Notification to my phone (Pushover and/or Telegram, whichever is configured) |
+| `record_unknown_question(question)` | The model doesn't know | Same notification fan-out — this is the backlog for improving `summary.txt` / `projects.md` |
 | `lookup_project(name)` | Fetch the full record for one repo from `github.json` | None — read-only, local |
 
 `lookup_project` is the cheap alternative to RAG: the index in the system prompt is enough to know
