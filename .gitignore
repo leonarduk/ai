@@ -60,3 +60,6 @@ linkedin.pdf
 # from the generic "build/" rule above
 !projects/08-linkedin-avatar/build/
 !projects/08-linkedin-avatar/build/**
+# ...but still ignore real Python cruft that lands inside it
+projects/08-linkedin-avatar/build/__pycache__/
+projects/08-linkedin-avatar/build/**/*.py[cod]
