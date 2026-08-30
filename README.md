@@ -44,6 +44,12 @@ Zero-dependency scheduled job that checks tomorrow's half-hourly Octopus Agile e
 
 **Tech stack:** Python (stdlib only), GitHub Actions (daily cron)
 
+### [LinkedIn Avatar](./projects/08-linkedin-avatar/)
+An AI twin that talks to visitors about my career and my GitHub projects — one link, dropped into the Featured section of my LinkedIn profile. Grounded in a redacted CV plus a nightly-refreshed snapshot of this org's repos, it hands contact requests off via Telegram and stays within a hard daily spend cap.
+
+**Status:** Live — [chat with it](https://ai-systems-lab-s8gy.onrender.com) or see the [landing page](https://leonarduk.github.io/ai-systems-lab/projects/08-linkedin-avatar/site/)
+**Tech stack:** Python, Gradio, DeepSeek API, GitHub REST API, Telegram, Render, GitHub Pages
+
 ### Prompt Engineering Patterns
 Structured prompts for code review, systems analysis, and log extraction with measurable outcomes — a systematic approach to LLM interaction design and output structuring.
 
@@ -117,7 +123,8 @@ ai-systems-lab/
 │   ├── 04-gmail-inbox-labeler/
 │   ├── 05-llm-cost-comparison/
 │   ├── 05-prize-draw-orchestrator/
-│   └── 06-octopus-agile-alert/
+│   ├── 06-octopus-agile-alert/
+│   └── 08-linkedin-avatar/
 ├── prompts/               # Prompt engineering examples
 ├── docs/                  # Architecture diagrams, guides, banner
 ├── examples/               # Reference implementations
@@ -125,4 +132,4 @@ ai-systems-lab/
 
 ---
 
-*Last updated: August 22, 2026*
+*Last updated: August 30, 2026*
