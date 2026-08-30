@@ -192,8 +192,13 @@ closest to the conversation.
 `context.py` enforces a token budget (`AVATAR_MAX_CONTEXT_TOKENS`, default 40k). If the assembled
 prompt exceeds it, repo full-records are dropped to index lines, oldest-pushed first, until it fits;
 if it still doesn't fit, that's a build error, not a silent truncation. DeepSeek has no count-tokens
-endpoint, so token counts come from the offline `deepseek_tokenizer` package (bundled at build time),
-not a runtime API call and not the character-count heuristic DeepSeek's own docs offer as a fallback.
+endpoint, and its offline tokenizer is distributed as a downloadable demo zip
+(`deepseek_v4_tokenizer.zip`), not a pip-installable package — not something to add as a project
+dependency for a build-time estimate. Token counts instead come from a conservative character-count
+heuristic, calibrated to DeepSeek's own documented ratios (~0.3 tokens/English character) with a
+safety margin: overestimating trims a repo record that would actually have fit, underestimating risks
+an oversized request. This is an estimate against the budget, not a billing figure — actual usage
+still comes from each response's `usage` block (§7).
 
 DeepSeek's context caching is **automatic and best-effort** — there is no `cache_control` breakpoint
 or TTL to set. The API builds cache units from stable prefixes across requests and reports
