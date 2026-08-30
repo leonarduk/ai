@@ -1,0 +1,235 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Steve Leonard — AI Twin</title>
+<meta name="description" content="Chat with Steve's AI twin about his career and every project in his GitHub. It reads both, and says when it doesn't know.">
+
+<!--
+  Update these two before publishing (see docs/design.md §9, §11):
+  - og:url / twitter card URLs below assume GitHub Pages serves this repo
+    from its root on the main branch; adjust if #132 configures it differently.
+  - The Render app URL is set once, in the script at the bottom, and is
+    referenced nowhere else — see the RENDER_APP_URL comment there.
+-->
+<meta property="og:type" content="website">
+<meta property="og:title" content="Steve Leonard — AI Twin">
+<meta property="og:description" content="Chat with Steve's AI twin about his career and every project in his GitHub. It reads both, and says when it doesn't know.">
+<meta property="og:image" content="https://leonarduk.github.io/ai-systems-lab/projects/08-linkedin-avatar/site/og-image.png">
+<meta property="og:url" content="https://leonarduk.github.io/ai-systems-lab/projects/08-linkedin-avatar/site/">
+
+<meta name="twitter:card" content="summary_large_image">
+<meta name="twitter:title" content="Steve Leonard — AI Twin">
+<meta name="twitter:description" content="Chat with Steve's AI twin about his career and every project in his GitHub. It reads both, and says when it doesn't know.">
+<meta name="twitter:image" content="https://leonarduk.github.io/ai-systems-lab/projects/08-linkedin-avatar/site/og-image.png">
+
+<style>
+  :root {
+    --bg-top: #0a0e1a;
+    --bg-mid: #121a30;
+    --bg-bottom: #0d1224;
+    --glow: rgba(76, 92, 220, 0.35);
+    --accent: #7f95ff;
+    --text: #ffffff;
+    --muted: #b8c0da;
+    --pill-border: rgba(127, 149, 255, 0.45);
+    --pill-bg: rgba(127, 149, 255, 0.08);
+    --pill-text: #dfe4ff;
+    --footer-border: rgba(255, 255, 255, 0.12);
+  }
+
+  @media (prefers-color-scheme: light) {
+    :root {
+      --bg-top: #f5f6fb;
+      --bg-mid: #eceffb;
+      --bg-bottom: #e4e8f8;
+      --glow: rgba(76, 92, 220, 0.12);
+      --accent: #2f4bd8;
+      --text: #14172a;
+      --muted: #4b5270;
+      --pill-border: rgba(47, 75, 216, 0.35);
+      --pill-bg: rgba(47, 75, 216, 0.06);
+      --pill-text: #2a3050;
+      --footer-border: rgba(20, 23, 42, 0.12);
+    }
+  }
+
+  * { box-sizing: border-box; }
+
+  html, body {
+    margin: 0;
+    padding: 0;
+    min-height: 100%;
+  }
+
+  body {
+    font-family: -apple-system, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+    color: var(--text);
+    background:
+      radial-gradient(ellipse at 15% 90%, var(--glow) 0%, transparent 45%),
+      linear-gradient(135deg, var(--bg-top) 0%, var(--bg-mid) 60%, var(--bg-bottom) 100%);
+    background-attachment: fixed;
+    min-height: 100vh;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    padding: 2.5rem 1.25rem 1.5rem;
+  }
+
+  main {
+    width: 100%;
+    max-width: 640px;
+    text-align: center;
+  }
+
+  .eyebrow {
+    color: var(--accent);
+    font-size: 0.8rem;
+    font-weight: 700;
+    letter-spacing: 3px;
+    text-transform: uppercase;
+    margin-bottom: 0.75rem;
+  }
+
+  h1 {
+    font-size: clamp(1.8rem, 5vw, 2.6rem);
+    margin: 0 0 0.75rem;
+  }
+
+  .pitch {
+    color: var(--muted);
+    font-size: 1.05rem;
+    line-height: 1.5;
+    margin: 0 auto 1.75rem;
+    max-width: 520px;
+  }
+
+  .examples {
+    list-style: none;
+    display: flex;
+    flex-direction: column;
+    gap: 0.6rem;
+    margin: 0 0 2rem;
+    padding: 0;
+  }
+
+  .examples li {
+    border: 1px solid var(--pill-border);
+    background: var(--pill-bg);
+    color: var(--pill-text);
+    border-radius: 12px;
+    padding: 0.7rem 1rem;
+    font-size: 0.95rem;
+  }
+
+  .cta {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.5rem;
+    background: var(--accent);
+    color: #ffffff;
+    text-decoration: none;
+    font-weight: 600;
+    font-size: 1.05rem;
+    padding: 0.85rem 1.75rem;
+    border-radius: 999px;
+    transition: opacity 0.15s ease;
+  }
+
+  .cta:hover, .cta:focus-visible {
+    opacity: 0.9;
+  }
+
+  footer {
+    margin-top: 2.5rem;
+    padding-top: 1.25rem;
+    border-top: 1px solid var(--footer-border);
+    font-size: 0.85rem;
+    color: var(--muted);
+  }
+
+  footer a {
+    color: var(--accent);
+    text-decoration: none;
+  }
+
+  footer a:hover, footer a:focus-visible {
+    text-decoration: underline;
+  }
+
+  footer .links {
+    display: flex;
+    justify-content: center;
+    gap: 1rem;
+    flex-wrap: wrap;
+    margin-bottom: 0.5rem;
+  }
+
+  @media (max-width: 480px) {
+    body { padding: 1.75rem 1rem 1.25rem; }
+    h1 { font-size: 1.6rem; }
+    .pitch { font-size: 0.95rem; }
+  }
+</style>
+</head>
+<body>
+<main>
+  <div class="eyebrow">Chat with the AI twin of</div>
+  <h1>Steve Leonard</h1>
+  <p class="pitch">
+    Ask about his background, or any project in his GitHub — it reads both.
+    It'll tell you when it doesn't know.
+  </p>
+
+  <ul class="examples">
+    <li>"What's his experience with Python and financial services?"</li>
+    <li>"Tell me about issue-worm."</li>
+    <li>"How do I get in touch with him?"</li>
+  </ul>
+
+  <!-- href is the real, working fallback for JavaScript disabled — the
+       script below only adds the prewarm fetch and the "waking up" label,
+       it does not set this href for the first time. Must match
+       RENDER_APP_URL in the script. -->
+  <a id="start-chat-btn" class="cta" href="https://linkedin-avatar.onrender.com">
+    <span class="cta-label">Start chatting</span>
+  </a>
+
+  <footer>
+    <div class="links">
+      <a href="https://github.com/leonarduk/ai-systems-lab/tree/main/projects/08-linkedin-avatar">GitHub repo</a>
+      <a href="https://github.com/leonarduk/ai-systems-lab/blob/main/projects/08-linkedin-avatar/docs/design.md">Design doc</a>
+    </div>
+    <div>This page loads instantly and wakes the chat app in the background — the first message may still take a few seconds.</div>
+  </footer>
+</main>
+
+<script>
+  // Set once the app is deployed (#130) — must match the button's href
+  // above, which is the real fallback for JavaScript disabled. This
+  // assignment just keeps JS-enabled visitors in sync if only one of the
+  // two ever gets updated.
+  var RENDER_APP_URL = "https://linkedin-avatar.onrender.com";
+
+  var btn = document.getElementById("start-chat-btn");
+  var label = btn.querySelector(".cta-label");
+  btn.href = RENDER_APP_URL;
+
+  try {
+    // no-cors: we don't need to read the response, only trigger the wake —
+    // and a sleeping/unreachable instance must never surface a console
+    // error or block the page.
+    fetch(RENDER_APP_URL, { mode: "no-cors" }).catch(function () {});
+  } catch (e) {
+    // Ignore — the button still links through even if fetch itself throws.
+  }
+
+  var originalLabel = label.textContent;
+  label.textContent = "Waking up my twin…";
+  setTimeout(function () {
+    label.textContent = originalLabel;
+  }, 20000);
+</script>
+</body>
+</html>
